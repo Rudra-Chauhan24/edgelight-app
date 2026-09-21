@@ -60,5 +60,19 @@ contextBridge.exposeInMainWorld('edgeLightAPI', {
     const subscription = (_event, ...args) => callback(...args);
     ipcRenderer.on('show-setup-wizard', subscription);
     return () => ipcRenderer.removeListener('show-setup-wizard', subscription);
+  },
+  // OTA Updater APIs
+  checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
+  downloadUpdate: (url) => ipcRenderer.invoke('download-update', url),
+  installUpdate: () => ipcRenderer.invoke('install-update'),
+  onUpdateAvailable: (callback) => {
+    const subscription = (_event, updateInfo) => callback(updateInfo);
+    ipcRenderer.on('update-available', subscription);
+    return () => ipcRenderer.removeListener('update-available', subscription);
+  },
+  onUpdateProgress: (callback) => {
+    const subscription = (_event, progress) => callback(progress);
+    ipcRenderer.on('update-download-progress', subscription);
+    return () => ipcRenderer.removeListener('update-download-progress', subscription);
   }
 });

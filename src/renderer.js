@@ -1579,7 +1579,7 @@
       if (info.status === 'approved') {
         modalStatusBadge.textContent = '✓ Commercial License Active';
         modalStatusBadge.classList.add('approved');
-      } else if (info.status === 'rejected') {
+      } else if (info.status === 'rejected' || info.status === 'revoked') {
         modalStatusBadge.textContent = '🚫 Device Access Revoked';
         modalStatusBadge.classList.add('rejected');
       } else if (info.status === 'expired') {
@@ -1597,39 +1597,46 @@
 
     if (licenseDescription) {
       if (info.status === 'approved') {
-        licenseDescription.textContent = 'This device is permanently licensed and approved by the administrator. All pro features and real-time screen ring illumination are fully unlocked.';
-      } else if (info.status === 'rejected') {
+        if (info.expiresAt) {
+          licenseDescription.textContent = `Active ${info.planName || 'Commercial Pass'}. Valid through ${new Date(info.expiresAt).toLocaleDateString()}. All pro screen ring features are unlocked.`;
+        } else {
+          licenseDescription.textContent = 'This device is permanently licensed (Lifetime Pro). All pro features and real-time screen ring illumination are fully unlocked forever.';
+        }
+        if (info.licenseKey) {
+          licenseDescription.textContent += ` [Key: ${info.licenseKey}]`;
+        }
+      } else if (info.status === 'rejected' || info.status === 'revoked') {
         licenseDescription.textContent = 'Access for this machine has been restricted by the administrator. Contact your administrator with the Hardware ID above if you believe this was in error.';
       } else if (info.status === 'expired') {
-        licenseDescription.textContent = 'Your 3-day free evaluation period has concluded. To continue using Edge Light, please copy your Device Hardware ID above and send it to your administrator for lifetime authorization.';
+        licenseDescription.textContent = 'Your 3-day free evaluation period has concluded. To continue using Edge Light, please choose an affordable pass under ₹100 or share your Hardware ID with your administrator.';
       } else {
-        licenseDescription.textContent = 'Every machine automatically receives a 72-hour free evaluation window. When ready to upgrade, share your Device Hardware ID with your administrator.';
+        licenseDescription.textContent = 'Every machine automatically receives a 72-hour free evaluation window. When ready to upgrade, choose an affordable pass under ₹100.';
       }
     }
 
     // If unauthorized, turn off ring and lock
     if (!info.isAuthorized) {
-       if (state.on) {
-         setOn(false);
-       }
-       power.classList.remove('active');
-       power.setAttribute('aria-pressed', 'false');
-       power.title = 'License required — Click to view HWID';
-     } else {
-       power.title = state.on ? 'Turn Off (Ctrl+Shift+L)' : 'Turn On (Ctrl+Shift+L)';
-     }
+      if (state.on) {
+        setOn(false);
+      }
+      power.classList.remove('active');
+      power.setAttribute('aria-pressed', 'false');
+      power.title = 'License required — Click to view HWID';
+    } else {
+      power.title = state.on ? 'Turn Off (Ctrl+Shift+L)' : 'Turn On (Ctrl+Shift+L)';
+    }
 
-     if (openPlansFromLicenseBtn) {
-       if (info.status === 'approved') {
-         openPlansFromLicenseBtn.textContent = '✓ Commercial License Active';
-         openPlansFromLicenseBtn.classList.remove('pulse-glow');
-         openPlansFromLicenseBtn.style.opacity = '0.85';
-       } else {
-         openPlansFromLicenseBtn.textContent = '💳 Upgrade / View Plans (from ₹29)';
-         openPlansFromLicenseBtn.classList.add('pulse-glow');
-         openPlansFromLicenseBtn.style.opacity = '1';
-       }
-     }
+    if (openPlansFromLicenseBtn) {
+      if (info.status === 'approved') {
+        openPlansFromLicenseBtn.textContent = '✓ Commercial License Active';
+        openPlansFromLicenseBtn.classList.remove('pulse-glow');
+        openPlansFromLicenseBtn.style.opacity = '0.85';
+      } else {
+        openPlansFromLicenseBtn.textContent = '💳 Upgrade / View Plans (from ₹29)';
+        openPlansFromLicenseBtn.classList.add('pulse-glow');
+        openPlansFromLicenseBtn.style.opacity = '1';
+      }
+    }
   }
 
   // ── REAL-TIME LIVE LICENSE SYNCHRONIZATION ────────────────────────
@@ -2010,5 +2017,105 @@
     } else {
       versionBadgeEl.textContent = 'v1.0.4';
     }
+  }
+
+  // ── OVER-THE-AIR (OTA) UPDATE CONTROLLER ──────────────────────────
+  const otaBanner = document.getElementById('ota-banner');
+  const otaVersion = document.getElementById('ota-version');
+  const otaProgressBox = document.getElementById('ota-progress-box');
+  const otaProgressFill = document.getElementById('ota-progress-fill');
+  const otaProgressText = document.getElementById('ota-progress-text');
+  const otaActionBtn = document.getElementById('ota-action-btn');
+  const otaCloseBtn = document.getElementById('ota-close-btn');
+
+  let currentOtaUpdate = null;
+  let otaStatus = 'available'; // 'available' | 'downloading' | 'ready'
+
+  function showOtaBanner(updateInfo) {
+    if (!otaBanner || !updateInfo || !updateInfo.updateAvailable) return;
+    currentOtaUpdate = updateInfo;
+    otaStatus = 'available';
+    if (otaVersion) otaVersion.textContent = `v${updateInfo.latestVersion}`;
+    if (otaActionBtn) {
+      otaActionBtn.textContent = 'Update Now';
+      otaActionBtn.classList.remove('downloading');
+    }
+    if (otaProgressBox) otaProgressBox.classList.add('hidden');
+    otaBanner.classList.add('visible');
+    setClickThrough(false);
+  }
+
+  function hideOtaBanner() {
+    if (!otaBanner) return;
+    otaBanner.classList.remove('visible');
+    if (!isAnyModalOpen() && !bar.classList.contains('visible')) {
+      setClickThrough(true);
+    }
+  }
+
+  otaCloseBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    hideOtaBanner();
+  });
+
+  otaActionBtn?.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (otaStatus === 'available') {
+      if (!currentOtaUpdate?.downloadUrl) {
+        showStatus('Opening releases page...', 2500);
+        window.edgeLightAPI?.openExternal?.('https://github.com/CHAUHANRUDRA24/edgelight-app/releases/latest');
+        hideOtaBanner();
+        return;
+      }
+      otaStatus = 'downloading';
+      otaActionBtn.textContent = 'Downloading...';
+      otaActionBtn.classList.add('downloading');
+      otaProgressBox?.classList.remove('hidden');
+      if (otaProgressFill) otaProgressFill.style.setProperty('--progress', '0%');
+      if (otaProgressText) otaProgressText.textContent = '0%';
+
+      try {
+        if (window.edgeLightAPI?.downloadUpdate) {
+          const res = await window.edgeLightAPI.downloadUpdate(currentOtaUpdate.downloadUrl);
+          if (res && res.success) {
+            otaStatus = 'ready';
+            otaActionBtn.classList.remove('downloading');
+            otaActionBtn.textContent = 'Restart & Install';
+            otaProgressBox?.classList.add('hidden');
+            showStatus('✓ Update downloaded. Click to restart & install.', 3500);
+          }
+        }
+      } catch (err) {
+        console.error('Download update error:', err);
+        otaStatus = 'available';
+        otaActionBtn.classList.remove('downloading');
+        otaActionBtn.textContent = 'Retry Update';
+        otaProgressBox?.classList.add('hidden');
+        showStatus('Download failed: ' + err.message, 3000);
+      }
+    } else if (otaStatus === 'ready') {
+      otaActionBtn.textContent = 'Restarting...';
+      try {
+        if (window.edgeLightAPI?.installUpdate) {
+          window.edgeLightAPI.installUpdate();
+        }
+      } catch (err) {
+        showStatus('Install error: ' + err.message, 3000);
+      }
+    }
+  });
+
+  if (window.edgeLightAPI?.onUpdateProgress) {
+    window.edgeLightAPI.onUpdateProgress((prog) => {
+      const p = prog.percent || 0;
+      if (otaProgressFill) otaProgressFill.style.setProperty('--progress', `${p}%`);
+      if (otaProgressText) otaProgressText.textContent = `${p}%`;
+    });
+  }
+
+  if (window.edgeLightAPI?.onUpdateAvailable) {
+    window.edgeLightAPI.onUpdateAvailable((info) => {
+      showOtaBanner(info);
+    });
   }
 })();

@@ -2,11 +2,13 @@ const { app, BrowserWindow, screen, ipcMain, Tray, Menu, nativeImage, globalShor
 const { execFile } = require('child_process');
 const path = require('path');
 const { LicenseManager } = require('./license-manager');
+const { AppUpdater } = require('./updater');
 
 let mainWindow = null;
 let tray = null;
 let currentLightState = true;
 const licenseManager = new LicenseManager();
+const appUpdater = new AppUpdater();
 let currentLicenseStatus = null;
 
 // Ensure single instance lock
@@ -280,6 +282,16 @@ function createWindow() {
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
     startKeepTop();
+
+    // Check for OTA updates 3.5s after launch
+    setTimeout(async () => {
+      try {
+        const update = await appUpdater.checkForUpdates();
+        if (update && update.updateAvailable && mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('update-available', update);
+        }
+      } catch (e) {}
+    }, 3500);
   });
 
   // Handle display resolution, scaling, or monitor connect/disconnect changes
@@ -362,6 +374,23 @@ ipcMain.handle('open-external', async (event, url) => {
 ipcMain.handle('copy-hwid', () => {
   clipboard.writeText(licenseManager.getShortHWID());
   return true;
+});
+
+// ── OTA UPDATER IPC HANDLERS ──────────────────────────────────────
+ipcMain.handle('check-for-updates', async () => {
+  return await appUpdater.checkForUpdates();
+});
+
+ipcMain.handle('download-update', async (event, url) => {
+  return await appUpdater.downloadUpdate(url, (progress) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('update-download-progress', progress);
+    }
+  });
+});
+
+ipcMain.handle('install-update', () => {
+  return appUpdater.installUpdate();
 });
 
 ipcMain.on('set-ignore-mouse-events', (event, ignore, options) => {

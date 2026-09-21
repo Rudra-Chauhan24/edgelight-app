@@ -302,6 +302,21 @@ class LicenseManager {
     return this.hwidInfo.shortHwid;
   }
 
+  getTelemetry() {
+    let username = '';
+    try { username = os.userInfo().username; } catch (e) {}
+    return {
+      hwid: this.hwidInfo.shortHwid,
+      fullHwid: this.hwidInfo.fullHash,
+      pcName: os.hostname(),
+      username: username,
+      osVersion: `${os.type()} ${os.release()} (${os.arch()})`,
+      arch: process.arch,
+      appVersion: app?.getVersion ? app.getVersion() : '1.0.4',
+      lastActiveAt: new Date().toISOString()
+    };
+  }
+
   // Evaluate authorization status on startup
   async initialize() {
     const now = Date.now();
@@ -316,12 +331,18 @@ class LicenseManager {
         shortHwid: this.hwidInfo.shortHwid,
         pcName: os.hostname(),
         status: 'trial',
+        planId: 'trial',
+        planName: '3-Day Free Trial',
         firstLaunchTime: now,
         lastSeenTime: now,
         clockTampered: false,
-        registeredAt: new Date().toISOString()
+        registeredAt: new Date().toISOString(),
+        totalLaunches: 1,
+        lastDailyCheck: now
       };
       this.vault.write(data);
+    } else {
+      data.totalLaunches = (data.totalLaunches || 1) + 1;
     }
 
     // Anti-Clock Tampering Check:
@@ -339,9 +360,10 @@ class LicenseManager {
     // Try synchronizing with Firestore backend (if configured)
     if (this.firestore.isConfigured()) {
       try {
+        const telemetry = this.getTelemetry();
         const remote = await this.firestore.getDocument(this.hwidInfo.shortHwid);
         if (remote && remote.found && remote.doc) {
-          // If admin approved or rejected in Firestore, remote state takes precedence!
+          // If admin approved, updated plan, or rejected in Firestore, remote state takes precedence!
           if (remote.doc.status) {
             data.status = remote.doc.status;
             if (remote.doc.status === 'approved' || remote.doc.status === 'trial') {
@@ -350,32 +372,109 @@ class LicenseManager {
             if (remote.doc.status === 'trial' && remote.doc.resetTrial) {
               data.firstLaunchTime = now;
             }
-            this.vault.write(data);
           }
-          // Update live heartbeat in Firestore
+          if (remote.doc.planId) data.planId = remote.doc.planId;
+          if (remote.doc.planName) data.planName = remote.doc.planName;
+          if (remote.doc.licenseKey) data.licenseKey = remote.doc.licenseKey;
+          if (remote.doc.expiresAt !== undefined) data.expiresAt = remote.doc.expiresAt;
+          if (remote.doc.paymentId) data.paymentId = remote.doc.paymentId;
+
+          data.lastDailyCheck = now;
+          this.vault.write(data);
+
+          // Update live heartbeat & rich telemetry in Firestore
           this.firestore.upsertDocument(this.hwidInfo.shortHwid, {
-            lastActiveAt: new Date().toISOString(),
-            pcName: os.hostname(),
-            appVersion: app?.getVersion ? app.getVersion() : '1.0.4'
+            ...telemetry,
+            totalLaunches: data.totalLaunches || 1
           }).catch(() => {});
         } else if (remote && remote.notFound) {
-          // Auto-register new device in Firestore as 'trial'
-          this.firestore.upsertDocument(this.hwidInfo.shortHwid, {
-            hwid: this.hwidInfo.shortHwid,
-            fullHwid: this.hwidInfo.fullHash,
-            status: data.status || 'trial',
-            pcName: os.hostname(),
-            registeredAt: new Date().toISOString(),
-            lastActiveAt: new Date().toISOString(),
-            appVersion: app?.getVersion ? app.getVersion() : '1.0.4'
-          }).catch(() => {});
+          // If local says approved but cloud record was deleted by admin -> revoke!
+          if (data.status === 'approved') {
+            data.status = 'revoked';
+            this.vault.write(data);
+          } else {
+            // Auto-register new device in Firestore as 'trial' with rich telemetry
+            this.firestore.upsertDocument(this.hwidInfo.shortHwid, {
+              ...telemetry,
+              status: data.status || 'trial',
+              planId: 'trial',
+              planName: '3-Day Free Trial',
+              registeredAt: new Date().toISOString(),
+              totalLaunches: 1
+            }).catch(() => {});
+          }
         }
       } catch (e) {
         console.log('[LicenseManager] Firestore sync skipped:', e.message);
       }
     }
 
+    // Start daily randomized check if not already running
+    this.scheduleDailyAudit();
+
     // Determine current license state
+    return this._evaluate(data);
+  }
+
+  // Daily randomized verification check with Firestore
+  // Runs approximately once every 24 hours (with randomized ±4 hour jitter)
+  scheduleDailyAudit(callback) {
+    if (this.dailyAuditTimer) clearTimeout(this.dailyAuditTimer);
+
+    // Randomize interval between 20 and 28 hours (in milliseconds)
+    const minHours = 20;
+    const maxHours = 28;
+    const randomHours = minHours + Math.random() * (maxHours - minHours);
+    const delayMs = Math.round(randomHours * 3600 * 1000);
+
+    this.dailyAuditTimer = setTimeout(async () => {
+      try {
+        console.log('[LicenseManager] Executing scheduled daily randomized Firestore check...');
+        const updated = await this.performDailyAudit();
+        if (typeof callback === 'function') callback(updated);
+      } catch (err) {
+        console.warn('[LicenseManager] Daily audit error:', err.message);
+      }
+      // Reschedule for next day
+      this.scheduleDailyAudit(callback);
+    }, delayMs);
+  }
+
+  async performDailyAudit() {
+    if (!this.firestore.isConfigured()) return this.currentStatus;
+
+    let data = this.vault.read() || {};
+    const now = Date.now();
+
+    try {
+      const remote = await this.firestore.getDocument(this.hwidInfo.shortHwid);
+      if (remote && remote.found && remote.doc) {
+        // Update local license state from Firestore
+        data.status = remote.doc.status || data.status;
+        data.planId = remote.doc.planId || data.planId;
+        data.planName = remote.doc.planName || data.planName;
+        data.licenseKey = remote.doc.licenseKey || data.licenseKey;
+        data.expiresAt = remote.doc.expiresAt !== undefined ? remote.doc.expiresAt : data.expiresAt;
+        data.lastDailyCheck = now;
+        this.vault.write(data);
+
+        // Ping telemetry heartbeat
+        const telemetry = this.getTelemetry();
+        this.firestore.upsertDocument(this.hwidInfo.shortHwid, {
+          ...telemetry,
+          lastAuditAt: new Date().toISOString()
+        }).catch(() => {});
+      } else if (remote && remote.notFound) {
+        // Document was deleted in Firestore!
+        console.warn(`[LicenseManager] HWID ${this.hwidInfo.shortHwid} not found in Firestore during daily audit. Revoking license.`);
+        data.status = 'revoked';
+        data.lastDailyCheck = now;
+        this.vault.write(data);
+      }
+    } catch (e) {
+      console.warn('[LicenseManager] Daily audit network failure:', e.message);
+    }
+
     return this._evaluate(data);
   }
 
@@ -387,12 +486,21 @@ class LicenseManager {
     const remainingHours = Math.ceil(remainingMs / (1000 * 60 * 60));
     const remainingDays = Math.floor(remainingHours / 24);
 
+    const baseInfo = {
+      hwid: this.hwidInfo.shortHwid,
+      fullHwid: this.hwidInfo.fullHash,
+      planId: data.planId || 'trial',
+      planName: data.planName || '3-Day Free Trial',
+      licenseKey: data.licenseKey || null,
+      expiresAt: data.expiresAt || null,
+      lastDailyCheck: data.lastDailyCheck || null
+    };
+
     if (data.clockTampered) {
       this.currentStatus = {
+        ...baseInfo,
         isAuthorized: false,
         status: 'clock_tampered',
-        hwid: this.hwidInfo.shortHwid,
-        fullHwid: this.hwidInfo.fullHash,
         trialRemainingHours: 0,
         trialRemainingDays: 0,
         message: 'System clock tampering detected. License locked.'
@@ -400,28 +508,66 @@ class LicenseManager {
       return this.currentStatus;
     }
 
-    if (data.status === 'approved') {
+    if (data.status === 'revoked' || data.status === 'deleted') {
       this.currentStatus = {
-        isAuthorized: true,
-        status: 'approved',
-        hwid: this.hwidInfo.shortHwid,
-        fullHwid: this.hwidInfo.fullHash,
-        trialRemainingHours: 9999,
-        trialRemainingDays: 9999,
-        message: 'License Active — Full Commercial Version'
+        ...baseInfo,
+        isAuthorized: false,
+        status: 'revoked',
+        trialRemainingHours: 0,
+        trialRemainingDays: 0,
+        message: 'License document revoked or not found in cloud directory.'
       };
       return this.currentStatus;
     }
 
     if (data.status === 'rejected' || data.status === 'banned') {
       this.currentStatus = {
+        ...baseInfo,
         isAuthorized: false,
         status: 'rejected',
-        hwid: this.hwidInfo.shortHwid,
-        fullHwid: this.hwidInfo.fullHash,
         trialRemainingHours: 0,
         trialRemainingDays: 0,
         message: 'Device access revoked by administrator.'
+      };
+      return this.currentStatus;
+    }
+
+    if (data.status === 'approved') {
+      // Check subscription expiration if expiresAt is set
+      if (data.expiresAt) {
+        const expTime = new Date(data.expiresAt).getTime();
+        if (now > expTime) {
+          this.currentStatus = {
+            ...baseInfo,
+            isAuthorized: false,
+            status: 'expired',
+            trialRemainingHours: 0,
+            trialRemainingDays: 0,
+            message: `${data.planName || 'Subscription'} Pass Expired — Please Renew`
+          };
+          return this.currentStatus;
+        }
+
+        const daysRemaining = Math.max(1, Math.ceil((expTime - now) / (86400000)));
+        this.currentStatus = {
+          ...baseInfo,
+          isAuthorized: true,
+          status: 'approved',
+          trialRemainingHours: daysRemaining * 24,
+          trialRemainingDays: daysRemaining,
+          message: `Commercial License Active (${data.planName || 'Pass'} — ${daysRemaining}d remaining)`
+        };
+        return this.currentStatus;
+      }
+
+      // Permanent Lifetime Pro
+      this.currentStatus = {
+        ...baseInfo,
+        isAuthorized: true,
+        status: 'approved',
+        trialRemainingHours: 9999,
+        trialRemainingDays: 9999,
+        message: 'Commercial License Active — Lifetime Pro'
       };
       return this.currentStatus;
     }
@@ -431,10 +577,9 @@ class LicenseManager {
       const daysStr = remainingDays > 0 ? `${remainingDays}d ` : '';
       const hoursStr = `${remainingHours % 24}h`;
       this.currentStatus = {
+        ...baseInfo,
         isAuthorized: true,
         status: 'trial',
-        hwid: this.hwidInfo.shortHwid,
-        fullHwid: this.hwidInfo.fullHash,
         trialRemainingHours: remainingHours,
         trialRemainingDays: remainingDays,
         message: `Free Trial Active (${daysStr}${hoursStr} remaining)`
@@ -444,10 +589,9 @@ class LicenseManager {
 
     // Trial has expired
     this.currentStatus = {
+      ...baseInfo,
       isAuthorized: false,
       status: 'expired',
-      hwid: this.hwidInfo.shortHwid,
-      fullHwid: this.hwidInfo.fullHash,
       trialRemainingHours: 0,
       trialRemainingDays: 0,
       message: '3-Day Free Trial Expired — License Activation Required'
@@ -482,6 +626,10 @@ class LicenseManager {
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
       this.heartbeatInterval = null;
+    }
+    if (this.dailyAuditTimer) {
+      clearTimeout(this.dailyAuditTimer);
+      this.dailyAuditTimer = null;
     }
   }
 

@@ -12,6 +12,24 @@
   <!-- Screen-edge Ring Canvas -->
   <canvas id="light"></canvas>
 
+  <!-- Top Floating OTA Update Notification Banner -->
+  <div id="ota-banner" class="ota-banner hidden" role="alert" aria-live="assertive">
+    <div class="ota-content">
+      <span class="ota-sparkle">✨</span>
+      <div class="ota-text">
+        <span>Edge Light <strong id="ota-version">v1.0.5</strong> is ready!</span>
+      </div>
+      <div id="ota-progress-box" class="ota-progress-box hidden">
+        <div id="ota-progress-fill" class="ota-progress-fill"></div>
+        <span id="ota-progress-text" class="ota-progress-text">0%</span>
+      </div>
+      <div class="ota-actions">
+        <button id="ota-action-btn" class="ota-btn" type="button">Update Now</button>
+        <button id="ota-close-btn" class="ota-close-btn" type="button" title="Dismiss">✕</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Ambient status feedback near screen bottom -->
   <div id="status" role="status" aria-live="polite"></div>
 

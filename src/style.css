@@ -1462,4 +1462,153 @@ input[type="range"]:focus-visible,
   padding: 12px 28px;
 }
 
+/* ── Top Floating OTA Update Notification Banner ─────────────── */
+.ota-banner {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  transform: translate(-50%, -32px);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 99999;
+  transition: transform 0.38s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.32s ease;
+  user-select: none;
+}
+
+.ota-banner.visible {
+  transform: translate(-50%, 0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.ota-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(18, 22, 32, 0.88);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 152, 0, 0.4);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.55), 0 0 24px rgba(255, 152, 0, 0.2);
+  padding: 10px 18px;
+  border-radius: 9999px;
+  color: #ffffff;
+}
+
+.ota-sparkle {
+  font-size: 18px;
+  animation: ota-sparkle-pulse 2s infinite ease-in-out;
+}
+
+@keyframes ota-sparkle-pulse {
+  0%, 100% { transform: scale(1) rotate(0deg); }
+  50% { transform: scale(1.15) rotate(12deg); }
+}
+
+.ota-text {
+  font-size: 13px;
+  font-weight: 500;
+  color: #e5e7eb;
+}
+
+.ota-text strong {
+  color: #fbbf24;
+  font-weight: 700;
+}
+
+.ota-progress-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 140px;
+}
+
+.ota-progress-box.hidden {
+  display: none;
+}
+
+.ota-progress-fill {
+  flex: 1;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+  overflow: hidden;
+  position: relative;
+}
+
+.ota-progress-fill::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; bottom: 0;
+  width: var(--progress, 0%);
+  background: linear-gradient(90deg, #ff9800, #fbbf24);
+  border-radius: 3px;
+  transition: width 0.15s ease;
+}
+
+.ota-progress-text {
+  font-size: 11px;
+  font-weight: 700;
+  color: #fbbf24;
+  min-width: 28px;
+}
+
+.ota-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ota-btn {
+  background: linear-gradient(135deg, #ffb366, #ff7700);
+  color: #000000;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 14px;
+  border: none;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(255, 119, 0, 0.35);
+  white-space: nowrap;
+}
+
+.ota-btn:hover {
+  background: linear-gradient(135deg, #ffc285, #ff8c1a);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(255, 119, 0, 0.5);
+}
+
+.ota-btn:active {
+  transform: translateY(0);
+}
+
+.ota-btn.downloading {
+  background: rgba(255, 255, 255, 0.12);
+  color: #f3f4f6;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  cursor: wait;
+  box-shadow: none;
+}
+
+.ota-close-btn {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 50%;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ota-close-btn:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+
 
