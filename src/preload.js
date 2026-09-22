@@ -45,6 +45,7 @@ contextBridge.exposeInMainWorld('edgeLightAPI', {
   refreshLicenseInfo: () => ipcRenderer.invoke('refresh-license-info'),
   copyHWID: () => ipcRenderer.invoke('copy-hwid'),
   getPaymentConfig: () => ipcRenderer.invoke('get-payment-config'),
+  createRazorpayPaymentLink: (params) => ipcRenderer.invoke('create-razorpay-link', params),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
   onLicenseStatusChanged: (callback) => {
     const subscription = (_event, info) => callback(info);

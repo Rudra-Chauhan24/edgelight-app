@@ -1277,50 +1277,76 @@ input[type="range"]:focus-visible,
   background: rgba(0, 0, 0, 0.45);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 16px;
-  padding: 14px 16px;
-  display: grid;
-  grid-template-columns: 1.4fr 1fr;
-  gap: 16px;
+  padding: 18px 24px;
+  display: flex;
+  flex-direction: column;
   align-items: center;
+  text-align: center;
+  gap: 12px;
 }
 
 .checkout-left {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+  width: 100%;
 }
 
 .checkout-summary {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  justify-content: center;
+  gap: 10px;
 }
 
 .checkout-plan-name {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 700;
   color: #ffffff;
 }
 
 .checkout-price {
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 800;
   color: #ffb366;
 }
 
 .checkout-help {
   margin: 0;
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.6);
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
   line-height: 1.4;
+  max-width: 440px;
 }
 
 .razorpay-btn {
-  font-size: 12.5px;
-  padding: 9px 14px;
-  background: linear-gradient(135deg, #0c2340 0%, #0284c7 100%);
-  border: 1px solid rgba(56, 189, 248, 0.4);
-  box-shadow: 0 4px 12px rgba(2, 132, 199, 0.3);
+  font-size: 13.5px;
+  font-weight: 700;
+  padding: 12px 28px;
+  min-width: 240px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #ff9f43 0%, #ff5252 100%);
+  border: 1px solid rgba(255, 178, 102, 0.5);
+  box-shadow: 0 4px 16px rgba(255, 159, 67, 0.35);
+  color: #ffffff;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: transform 150ms ease, box-shadow 150ms ease, filter 150ms ease;
+}
+
+.razorpay-btn:hover {
+  filter: brightness(1.1);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(255, 159, 67, 0.5);
+}
+
+.razorpay-btn:active {
+  transform: scale(0.98);
 }
 
 .razorpay-btn:hover {

@@ -1,6 +1,7 @@
 const { app, BrowserWindow, screen, ipcMain, Tray, Menu, nativeImage, globalShortcut, session, clipboard, shell } = require('electron');
 const { execFile } = require('child_process');
 const path = require('path');
+const https = require('https');
 const { LicenseManager } = require('./license-manager');
 const { AppUpdater } = require('./updater');
 
@@ -369,6 +370,68 @@ ipcMain.handle('open-external', async (event, url) => {
     return true;
   }
   return false;
+});
+
+ipcMain.handle('create-razorpay-link', async (event, params) => {
+  try {
+    const planId = params?.planId || 'quarterly';
+    const hwid = params?.hwid || licenseManager.getShortHWID();
+    const plans = {
+      monthly: { amount: 2900, name: 'Monthly Pass', fallback: 'https://rzp.io/rzp/WY3lkA6' },
+      quarterly: { amount: 4900, name: '3-Month Pass', fallback: 'https://rzp.io/rzp/01mOm4K' },
+      lifetime: { amount: 9900, name: 'Lifetime Pro', fallback: 'https://rzp.io/rzp/K30Pa9v' }
+    };
+    const target = plans[planId] || plans.quarterly;
+    const keyId = process.env.RAZORPAY_KEY_ID || 'rzp_live_TbF2T3PxIu4EAn';
+    const keySecret = process.env.RAZORPAY_KEY_SECRET || 'REDACTED_RAZORPAY_SECRET';
+    const auth = Buffer.from(`${keyId}:${keySecret}`).toString('base64');
+
+    const postData = JSON.stringify({
+      amount: target.amount,
+      currency: 'INR',
+      accept_partial: false,
+      description: `Edge Light ${target.name} License`,
+      notes: {
+        hwid: String(hwid).trim(),
+        plan: planId
+      }
+    });
+
+    return await new Promise((resolve) => {
+      const req = https.request({
+        hostname: 'api.razorpay.com',
+        path: '/v1/payment_links',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Basic ${auth}`,
+          'Content-Length': Buffer.byteLength(postData)
+        },
+        timeout: 4000
+      }, (res) => {
+        let body = '';
+        res.on('data', chunk => body += chunk);
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(body);
+            if (parsed && parsed.short_url) {
+              resolve(parsed.short_url);
+            } else {
+              resolve(target.fallback);
+            }
+          } catch (e) {
+            resolve(target.fallback);
+          }
+        });
+      });
+      req.on('error', () => resolve(target.fallback));
+      req.on('timeout', () => { req.destroy(); resolve(target.fallback); });
+      req.write(postData);
+      req.end();
+    });
+  } catch (err) {
+    return 'https://rzp.io/rzp/01mOm4K';
+  }
 });
 
 ipcMain.handle('copy-hwid', () => {

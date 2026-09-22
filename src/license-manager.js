@@ -23,9 +23,9 @@ function loadEnv() {
     RAZORPAY_KEY_ID: 'rzp_live_TbF2T3PxIu4EAn',
     RAZORPAY_KEY_SECRET: 'REDACTED_RAZORPAY_SECRET',
     RAZORPAY_WEBHOOK_SECRET: 'REDACTED_RAZORPAY_SECRET',
-    RAZORPAY_PAYMENT_LINK_MONTHLY: 'https://rzp.io/l/edgelight-monthly',
-    RAZORPAY_PAYMENT_LINK_QUARTERLY: 'https://rzp.io/l/edgelight-3months',
-    RAZORPAY_PAYMENT_LINK_LIFETIME: 'https://rzp.io/l/edgelight-lifetime',
+    RAZORPAY_PAYMENT_LINK_MONTHLY: 'https://rzp.io/rzp/WY3lkA6',
+    RAZORPAY_PAYMENT_LINK_QUARTERLY: 'https://rzp.io/rzp/01mOm4K',
+    RAZORPAY_PAYMENT_LINK_LIFETIME: 'https://rzp.io/rzp/K30Pa9v',
     RAZORPAY_UPI_ID: 'edgelight@upi'
   };
 
@@ -675,7 +675,7 @@ class LicenseManager {
         price: 29,
         period: '/ month',
         popular: false,
-        link: this.config.RAZORPAY_PAYMENT_LINK_MONTHLY || 'https://rzp.io/l/edgelight-monthly',
+        link: this.config.RAZORPAY_PAYMENT_LINK_MONTHLY || 'https://rzp.io/rzp/WY3lkA6',
         features: [
           '30 Days Unlimited Illumination',
           'Webcam Auto-Metering & Low-Light Detect',
@@ -690,7 +690,7 @@ class LicenseManager {
         period: '/ 3 months (~₹16/mo)',
         popular: true,
         badge: 'Most Popular',
-        link: this.config.RAZORPAY_PAYMENT_LINK_QUARTERLY || 'https://rzp.io/l/edgelight-3months',
+        link: this.config.RAZORPAY_PAYMENT_LINK_QUARTERLY || 'https://rzp.io/rzp/01mOm4K',
         features: [
           '90 Days Continuous Studio Ring',
           'Includes All Monthly Pass Features',
@@ -705,7 +705,7 @@ class LicenseManager {
         period: 'one-time forever',
         popular: false,
         badge: 'Best Value',
-        link: this.config.RAZORPAY_PAYMENT_LINK_LIFETIME || 'https://rzp.io/l/edgelight-lifetime',
+        link: this.config.RAZORPAY_PAYMENT_LINK_LIFETIME || 'https://rzp.io/rzp/K30Pa9v',
         features: [
           'Permanent Lifetime Commercial License',
           'Zero Monthly or Yearly Renewals Ever',

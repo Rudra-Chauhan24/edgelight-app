@@ -245,14 +245,14 @@
             </div>
           </div>
 
-          <!-- Razorpay Link & UPI QR Scan Section -->
+          <!-- Razorpay Direct Buying Section -->
           <div class="checkout-box">
             <div class="checkout-left">
               <div class="checkout-summary">
                 <span class="checkout-plan-name" id="selectedPlanTitle">3-Month Pass</span>
                 <span class="checkout-price" id="selectedPlanPrice">₹49</span>
               </div>
-              <p class="checkout-help">Click below to pay via Razorpay (Cards, NetBanking, Wallets, UPI) or scan the QR code directly with any UPI app.</p>
+              <p class="checkout-help">Click below to pay securely via Razorpay (UPI, Google Pay, PhonePe, Paytm, Cards, NetBanking, Wallets).</p>
               
               <button type="button" class="primary-btn razorpay-btn" id="razorpayDirectBtn">
                 <span class="rzp-icon">⚡</span> Pay <span id="rzpBtnPrice">₹49</span> with Razorpay
@@ -264,12 +264,10 @@
               </div>
             </div>
 
-            <div class="checkout-right">
+            <!-- Direct QR hidden per user request -->
+            <div class="checkout-right" style="display: none;">
               <div class="qr-container">
-                <div class="qr-label">Scan to Pay via UPI</div>
                 <img id="upiQrImg" class="upi-qr-image" alt="UPI Payment QR Code" src="" />
-                <div class="qr-apps">GPay • PhonePe • Paytm • BHIM</div>
-                <div class="upi-id-label" id="upiIdDisplay">UPI: edgelight@upi</div>
               </div>
             </div>
           </div>

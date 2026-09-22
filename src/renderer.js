@@ -1889,8 +1889,25 @@
       ? paymentConfig.plans.reduce((acc, p) => { acc[p.id] = p; return acc; }, {})
       : paymentConfig.plans);
     const plan = plansSource?.[currentSelectedPlanId] || plansSource?.quarterly || {};
-    const url = plan.link || 'https://razorpay.com';
+    let url = plan.link || 'https://rzp.io/rzp/01mOm4K';
+    const hwid = wizardHwidCode?.textContent || licenseState.hwid || '';
+
     showStatus(`⚡ Launching Razorpay checkout (₹${plan.price || 49})…`, 3000);
+
+    if (window.edgeLightAPI?.createRazorpayPaymentLink) {
+      try {
+        const dynamicUrl = await window.edgeLightAPI.createRazorpayPaymentLink({
+          planId: currentSelectedPlanId || 'quarterly',
+          hwid: hwid
+        });
+        if (dynamicUrl && dynamicUrl.startsWith('http')) {
+          url = dynamicUrl;
+        }
+      } catch (err) {
+        console.warn('[Razorpay] Dynamic checkout link fallback:', err);
+      }
+    }
+
     if (window.edgeLightAPI?.openExternal) {
       await window.edgeLightAPI.openExternal(url);
     } else {
