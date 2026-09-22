@@ -431,22 +431,22 @@
       const p = mouseState.currentProximity;
 
       const screenMin = Math.min(sw, sh);
-      const dynamicHoleRadius = Math.round(Math.max(160, Math.min(260, animThick * 1.5 + screenMin * 0.12)));
+      // High-accuracy responsive hole radius scaled to screen and ring thickness
+      const dynamicHoleRadius = Math.round(Math.max(140, Math.min(240, animThick * 1.4 + screenMin * 0.10)));
       const hr = dynamicHoleRadius * ts;
       if (hr < 10) return;
 
-      // Apple signature dual-zone recession:
-      // 1. Crystal Clear Core: transparent so cursor & UI text are never obscured
-      // 2. Smoothstep Feathered Falloff: C1 continuous transition with zero hard boundary
-      const coreR = Math.min(hr * 0.45, Math.max(8, hr * 0.28));
-      const coreRatio = Math.max(0.05, Math.min(0.65, coreR / hr));
+      // Pinpoint accurate cursor visibility zone:
+      // Expanded clear core guarantees the pointer, click target, and text are 100% visible
+      const coreR = Math.min(hr * 0.52, Math.max(32, hr * 0.38));
+      const coreRatio = Math.max(0.08, Math.min(0.65, coreR / hr));
 
       const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, hr);
       grad.addColorStop(0.0, `rgba(0,0,0,${p})`);
       grad.addColorStop(coreRatio, `rgba(0,0,0,${p})`);
 
-      // 8 smoothstep points: S(t) = 3t^2 - 2t^3 gives buttery seamless curvature
-      const steps = 8;
+      // 10 smoothstep points for ultra-smooth C1 continuous falloff
+      const steps = 10;
       let lastStop = coreRatio;
       for (let i = 1; i <= steps; i++) {
         const t = i / steps;
@@ -559,13 +559,15 @@
         mouseState.currentX = mouseState.targetX;
         mouseState.currentY = mouseState.targetY;
       } else {
-        // Fluid spring follow (damping factor ~28ms for organic motion)
-        const mouseFollow = 1 - Math.exp(-dt / 28);
+        // High-precision adaptive tracking: snaps immediately on fast movement, silky glide on slow movement
         const dx = mouseState.targetX - mouseState.currentX;
         const dy = mouseState.targetY - mouseState.currentY;
+        const dist = Math.hypot(dx, dy);
+        const followTau = dist > 90 ? 6 : (dist > 30 ? 10 : 15);
+        const mouseFollow = 1 - Math.exp(-dt / followTau);
         mouseState.currentX += dx * mouseFollow;
         mouseState.currentY += dy * mouseFollow;
-        if (Math.abs(dx) > 0.4 || Math.abs(dy) > 0.4) {
+        if (Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1) {
           needsNextFrame = true;
         }
       }
@@ -588,8 +590,9 @@
       const innerW = outerW - animThick * 2;
       const innerH = outerH - animThick * 2;
 
-      const cx = mouseState.currentX;
-      const cy = mouseState.currentY;
+      // Use true target cursor coordinate for proximity to eliminate any approach latency
+      const cx = mouseState.targetX;
+      const cy = mouseState.targetY;
 
       // Compute signed penetration into the light band (positive = inside band, negative = inside screen center)
       let bandDepth = 0;
@@ -623,15 +626,15 @@
       }
 
       // targetP: 1.0 everywhere inside the light band, smoothly dissolving as cursor retreats into screen center
-      const approachZone = 120;
-      targetP = Math.max(0, Math.min(1.0, (bandDepth + approachZone) / (approachZone - 20)));
+      const approachZone = 110;
+      targetP = Math.max(0, Math.min(1.0, (bandDepth + approachZone) / (approachZone - 15)));
     }
 
     mouseState.targetProximity = targetP;
 
-    // Smooth bloom-in (~40ms) and dissolve-out (~75ms) for the recession cove
+    // Fast opening response (~16ms) and smooth dissolve-out (~42ms) for optimal cursor responsiveness
     if (mouseState.currentProximity !== targetP) {
-      const pSpeed = targetP > mouseState.currentProximity ? 40 : 75;
+      const pSpeed = targetP > mouseState.currentProximity ? 16 : 42;
       const pDamping = 1 - Math.exp(-dt / pSpeed);
       const dp = targetP - mouseState.currentProximity;
       if (Math.abs(dp) > 0.002) {
@@ -786,9 +789,9 @@
   });
 
   // Calibration threshold
-  thresholdInput.addEventListener('input', () => {
+  thresholdInput?.addEventListener('input', () => {
     state.autoThreshold = Number(thresholdInput.value);
-    thresholdVal.textContent = thresholdInput.value;
+    if (thresholdVal) thresholdVal.textContent = thresholdInput.value;
     showStatus(`🎚️ Sensitivity: ${thresholdInput.value}`, 1500);
     if (stream && videoEl && videoEl.readyState >= 2) {
       sampleFromVideo();
@@ -1182,7 +1185,7 @@
       isCameraOff = false;
       isTrackMuted = false;
       autoWebcamEnabled = true;
-      autoSwitch.setAttribute('aria-checked', 'true');
+      autoSwitch?.setAttribute('aria-checked', 'true');
       if (thresholdWrap) thresholdWrap.classList.add('active');
       showStatus('📷 Auto camera detection active ✨', 2200);
       if (currentWebcamInUse && !state.on) {
@@ -1236,8 +1239,8 @@
         handleCameraOff();
       });
 
-      autoSwitch.setAttribute('aria-checked', 'true');
-      thresholdWrap.classList.add('active');
+      autoSwitch?.setAttribute('aria-checked', 'true');
+      if (thresholdWrap) thresholdWrap.classList.add('active');
       if (privacyNote && bar.classList.contains('visible') && state.on) {
         privacyNote.classList.add('visible');
       }
@@ -1323,8 +1326,8 @@
     vctx = null;
     smoothLuminance = null;
     lastAutoState = null;
-    autoSwitch.setAttribute('aria-checked', 'false');
-    thresholdWrap.classList.remove('active');
+    autoSwitch?.setAttribute('aria-checked', 'false');
+    thresholdWrap?.classList.remove('active');
     if (privacyNote) privacyNote.classList.remove('visible');
     if (liveLux) liveLux.textContent = '';
     hideStatus();
@@ -1492,7 +1495,7 @@
 
   function toggleAuto() {
     autoWebcamEnabled = !autoWebcamEnabled;
-    autoSwitch.setAttribute('aria-checked', autoWebcamEnabled ? 'true' : 'false');
+    autoSwitch?.setAttribute('aria-checked', autoWebcamEnabled ? 'true' : 'false');
     if (thresholdWrap) {
       thresholdWrap.classList.toggle('active', autoWebcamEnabled);
     }
@@ -1512,9 +1515,9 @@
   }
 
   // Set Auto switch active by default for MacBook-style instant camera detection
-  autoSwitch.setAttribute('aria-checked', 'true');
+  autoSwitch?.setAttribute('aria-checked', 'true');
 
-  autoSwitch.addEventListener('click', (e) => {
+  autoSwitch?.addEventListener('click', (e) => {
     e.stopPropagation();
     toggleAuto();
   });
@@ -1523,7 +1526,7 @@
     toggleAuto();
   });
   autoSwitchWrap?.addEventListener('click', (e) => {
-    if (e.target !== autoSwitch && !autoSwitch.contains(e.target) && e.target !== autoLabel) {
+    if (e.target !== autoSwitch && !autoSwitch?.contains(e.target) && e.target !== autoLabel) {
       toggleAuto();
     }
   });

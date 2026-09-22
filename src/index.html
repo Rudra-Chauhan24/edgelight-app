@@ -59,23 +59,6 @@
     <!-- Divider -->
     <div class="div" aria-hidden="true"></div>
 
-    <!-- 6. Auto-mode switch -->
-    <div class="switch-wrap" id="autoSwitchWrap" title="Automatic ambient low-light detection via webcam">
-      <button id="autoSwitch" class="switch-btn" type="button" role="switch" aria-checked="false" aria-label="Auto (camera)">
-        <span class="knob" aria-hidden="true"></span>
-      </button>
-      <span id="autoLabel" class="switch-label"><span class="ctrl-icon">📷</span> Auto</span>
-    </div>
-
-    <!-- 7. Calibration slider (poppily expands when Auto is turned on) -->
-    <div class="ctrl threshold-ctrl" id="thresholdWrap" title="Adjust ambient dark threshold (15-180)">
-      <label for="threshold"><span class="ctrl-icon">🎚️</span> Sens <span class="val" id="thresholdVal">70</span><span class="live-lux" id="liveLux"></span></label>
-      <input id="threshold" type="range" min="15" max="180" value="70" aria-label="Auto brightness threshold calibration">
-    </div>
-
-    <!-- 10. Divider -->
-    <div class="div" aria-hidden="true"></div>
-
     <!-- Footer action & version row -->
     <div class="dock-footer">
       <button id="dismissBtn" class="dismiss-btn" type="button" title="Send controls to background / Hide" aria-label="Hide controls">✕</button>

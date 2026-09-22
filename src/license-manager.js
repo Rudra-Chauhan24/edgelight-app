@@ -186,6 +186,14 @@ class FirestoreClient {
     const url = `https://firestore.googleapis.com/v1/projects/${this.projectId}/databases/(default)/documents/${this.collection}/${encodeURIComponent(docId)}${this.apiKey ? '?key=' + this.apiKey : ''}`;
 
     return new Promise((resolve) => {
+      let settled = false;
+      const safeResolve = (val) => {
+        if (!settled) {
+          settled = true;
+          resolve(val);
+        }
+      };
+
       const req = https.get(url, { timeout: 5000 }, (res) => {
         let body = '';
         res.on('data', chunk => body += chunk);
@@ -193,23 +201,23 @@ class FirestoreClient {
           if (res.statusCode === 200) {
             try {
               const parsed = JSON.parse(body);
-              resolve({ found: true, doc: this._parseFields(parsed?.fields) });
+              safeResolve({ found: true, doc: this._parseFields(parsed?.fields) });
             } catch (e) {
-              resolve({ found: false, error: e.message });
+              safeResolve({ found: false, error: e.message });
             }
           } else if (res.statusCode === 404) {
-            resolve({ found: false, notFound: true });
+            safeResolve({ found: false, notFound: true });
           } else {
-            resolve({ found: false, error: `HTTP ${res.statusCode}` });
+            safeResolve({ found: false, error: `HTTP ${res.statusCode}` });
           }
         });
       });
       req.on('timeout', () => {
         req.destroy();
-        resolve({ found: false, error: 'Request timeout' });
+        safeResolve({ found: false, error: 'Request timeout' });
       });
       req.on('error', (err) => {
-        resolve({ found: false, error: err.message });
+        safeResolve({ found: false, error: err.message });
       });
     });
   }
@@ -226,6 +234,14 @@ class FirestoreClient {
     const payload = JSON.stringify({ fields: this._formatFields(fieldsObj) });
 
     return new Promise((resolve) => {
+      let settled = false;
+      const safeResolve = (val) => {
+        if (!settled) {
+          settled = true;
+          resolve(val);
+        }
+      };
+
       const req = https.request(url, {
         method: 'PATCH',
         timeout: 6000,
@@ -237,15 +253,15 @@ class FirestoreClient {
         let body = '';
         res.on('data', chunk => body += chunk);
         res.on('end', () => {
-          resolve(res.statusCode >= 200 && res.statusCode < 300);
+          safeResolve(res.statusCode >= 200 && res.statusCode < 300);
         });
       });
 
       req.on('timeout', () => {
         req.destroy();
-        resolve(false);
+        safeResolve(false);
       });
-      req.on('error', () => resolve(false));
+      req.on('error', () => safeResolve(false));
       req.write(payload);
       req.end();
     });
@@ -296,6 +312,9 @@ class LicenseManager {
       message: 'Verifying license...'
     };
     this.heartbeatInterval = null;
+    this.dailyAuditTimer = null;
+    this._hasInitialized = false;
+    this._dailyAuditCallback = null;
   }
 
   getShortHWID() {
@@ -341,7 +360,8 @@ class LicenseManager {
         lastDailyCheck: now
       };
       this.vault.write(data);
-    } else {
+    } else if (!this._hasInitialized) {
+      // Only increment total launches once on real app startup, not on every 30s background sync!
       data.totalLaunches = (data.totalLaunches || 1) + 1;
     }
 
@@ -409,8 +429,11 @@ class LicenseManager {
       }
     }
 
-    // Start daily randomized check if not already running
-    this.scheduleDailyAudit();
+    // Start daily randomized check once on initial startup if not already scheduled
+    if (!this.dailyAuditTimer) {
+      this.scheduleDailyAudit();
+    }
+    this._hasInitialized = true;
 
     // Determine current license state
     return this._evaluate(data);
@@ -419,6 +442,9 @@ class LicenseManager {
   // Daily randomized verification check with Firestore
   // Runs approximately once every 24 hours (with randomized ±4 hour jitter)
   scheduleDailyAudit(callback) {
+    if (typeof callback === 'function') {
+      this._dailyAuditCallback = callback;
+    }
     if (this.dailyAuditTimer) clearTimeout(this.dailyAuditTimer);
 
     // Randomize interval between 20 and 28 hours (in milliseconds)
@@ -431,13 +457,17 @@ class LicenseManager {
       try {
         console.log('[LicenseManager] Executing scheduled daily randomized Firestore check...');
         const updated = await this.performDailyAudit();
-        if (typeof callback === 'function') callback(updated);
+        const cb = typeof callback === 'function' ? callback : this._dailyAuditCallback;
+        if (typeof cb === 'function') cb(updated);
       } catch (err) {
         console.warn('[LicenseManager] Daily audit error:', err.message);
       }
       // Reschedule for next day
-      this.scheduleDailyAudit(callback);
+      this.scheduleDailyAudit();
     }, delayMs);
+    if (this.dailyAuditTimer && typeof this.dailyAuditTimer.unref === 'function') {
+      this.dailyAuditTimer.unref();
+    }
   }
 
   async performDailyAudit() {
@@ -620,6 +650,9 @@ class LicenseManager {
         if (typeof callback === 'function') callback(updated);
       } catch (e) {}
     }, intervalMs);
+    if (this.heartbeatInterval && typeof this.heartbeatInterval.unref === 'function') {
+      this.heartbeatInterval.unref();
+    }
   }
 
   stop() {

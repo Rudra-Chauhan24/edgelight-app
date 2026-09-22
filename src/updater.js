@@ -3,6 +3,7 @@ const https = require('https');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { spawn } = require('child_process');
 
 class AppUpdater {
@@ -33,9 +34,12 @@ class AppUpdater {
     return rPatch > lPatch;
   }
 
-  // Fetch JSON from URL
-  fetchJson(url) {
+  // Fetch JSON from URL with redirect limit guard
+  fetchJson(url, redirectCount = 0) {
     return new Promise((resolve, reject) => {
+      if (redirectCount >= 5) {
+        return reject(new Error('Too many redirects while checking update'));
+      }
       const parsedUrl = new URL(url);
       const client = parsedUrl.protocol === 'https:' ? https : http;
 
@@ -47,7 +51,7 @@ class AppUpdater {
         timeout: 6000
       }, (res) => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          return resolve(this.fetchJson(res.headers.location));
+          return resolve(this.fetchJson(res.headers.location, redirectCount + 1));
         }
         if (res.statusCode < 200 || res.statusCode >= 300) {
           return reject(new Error(`Server responded with HTTP ${res.statusCode}`));
@@ -143,7 +147,11 @@ class AppUpdater {
       const targetFileName = `EdgeLight-Setup-${this.currentUpdateInfo?.latestVersion || 'update'}-${Date.now()}.exe`;
       const targetFilePath = path.join(tempDir, targetFileName);
 
-      const makeDownloadRequest = (targetUrl) => {
+      const makeDownloadRequest = (targetUrl, redirectCount = 0) => {
+        if (redirectCount >= 5) {
+          this.downloadInProgress = false;
+          return reject(new Error('Too many download redirects'));
+        }
         const parsedUrl = new URL(targetUrl);
         const client = parsedUrl.protocol === 'https:' ? https : http;
 
@@ -154,7 +162,7 @@ class AppUpdater {
         }, (res) => {
           // Follow HTTP 301/302/307 redirects (standard on GitHub Releases and CDNs)
           if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-            return makeDownloadRequest(res.headers.location);
+            return makeDownloadRequest(res.headers.location, redirectCount + 1);
           }
 
           if (res.statusCode < 200 || res.statusCode >= 300) {
@@ -165,6 +173,13 @@ class AppUpdater {
           const totalBytes = parseInt(res.headers['content-length'], 10) || 0;
           let downloadedBytes = 0;
           const fileStream = fs.createWriteStream(targetFilePath);
+
+          fileStream.on('error', (err) => {
+            this.downloadInProgress = false;
+            try { fileStream.close(); } catch (e) {}
+            try { fs.unlinkSync(targetFilePath); } catch (e) {}
+            reject(err);
+          });
 
           res.on('data', (chunk) => {
             downloadedBytes += chunk.length;

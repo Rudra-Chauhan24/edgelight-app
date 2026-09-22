@@ -476,7 +476,7 @@ function checkWebcamUsage() {
     'query',
     'HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\webcam',
     '/s'
-  ], { windowsHide: true }, (err, stdout) => {
+  ], { windowsHide: true, timeout: 5000 }, (err, stdout) => {
     isCheckingWebcam = false;
     if (err || !stdout) return;
 
