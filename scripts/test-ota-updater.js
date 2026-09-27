@@ -5,19 +5,10 @@ const { AppUpdater } = require('../src/updater');
 
 console.log('🧪 Testing Over-The-Air (OTA) Updater System...\n');
 
-let passed = 0;
-let failed = 0;
+const tests = [];
 
 function it(desc, fn) {
-  try {
-    fn();
-    console.log('  ✓ ' + desc);
-    passed++;
-  } catch (err) {
-    console.error('  ✗ ' + desc);
-    console.error('    ' + err.message);
-    failed++;
-  }
+  tests.push({ desc, fn });
 }
 
 const updater = new AppUpdater();
@@ -42,18 +33,18 @@ it('isNewerVersion detects newer versions correctly', () => {
 
 // 3. Mock Check for Updates
 it('checkForUpdates flags available update when remote version is newer', async () => {
-  const mockUpdater = new AppUpdater();
+  const mockUpdater = new AppUpdater({ currentVersion: '1.0.5' });
   mockUpdater.fetchJson = async () => ({
-    version: '1.0.5',
+    version: '1.0.6',
     releaseDate: new Date().toISOString(),
-    notes: '✨ Optical squircle continuous curvature and OTA updates',
-    downloadUrl: 'https://example.com/EdgeLight-Setup-1.0.5.exe'
+    notes: '✨ Payment window layering fixes, browser tab checkout, and active banner',
+    downloadUrl: 'https://example.com/EdgeLight-Setup-1.0.6.exe'
   });
 
   const res = await mockUpdater.checkForUpdates();
   assert.strictEqual(res.updateAvailable, true);
-  assert.strictEqual(res.latestVersion, '1.0.5');
-  assert.strictEqual(res.downloadUrl, 'https://example.com/EdgeLight-Setup-1.0.5.exe');
+  assert.strictEqual(res.latestVersion, '1.0.6');
+  assert.strictEqual(res.downloadUrl, 'https://example.com/EdgeLight-Setup-1.0.6.exe');
 });
 
 // 4. HTML Elements Verification
@@ -102,5 +93,22 @@ it('backend/server.js contains /api/updates/latest and /api/updates/publish', ()
   assert(serverCode.includes('/api/devices'), 'Missing /api/devices');
 });
 
-console.log(`\nResults: ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);
+(async () => {
+  let passed = 0;
+  let failed = 0;
+
+  for (const { desc, fn } of tests) {
+    try {
+      await fn();
+      console.log('  ✓ ' + desc);
+      passed++;
+    } catch (err) {
+      console.error('  ✗ ' + desc);
+      console.error('    ' + err.message);
+      failed++;
+    }
+  }
+
+  console.log(`\nResults: ${passed} passed, ${failed} failed`);
+  if (failed > 0) process.exit(1);
+})();

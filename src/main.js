@@ -5,6 +5,61 @@ const https = require('https');
 const { LicenseManager } = require('./license-manager');
 const { AppUpdater } = require('./updater');
 
+// ── INTERNET CONNECTIVITY MONITOR ─────────────────────────────────
+let isOnline = true;
+let lastOnlineTime = Date.now();
+let connectivityCheckInterval = null;
+
+function checkConnectivity() {
+  const req = https.get('https://firestore.googleapis.com', { timeout: 4000 }, (res) => {
+    const wasOffline = !isOnline;
+    isOnline = true;
+    lastOnlineTime = Date.now();
+    // Record online timestamp in encrypted license vault
+    try { licenseManager.recordOnline(); } catch (e) {}
+    if (wasOffline && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('connectivity-changed', true);
+      // Trigger immediate license re-check on reconnect
+      licenseManager.refresh().then(status => {
+        currentLicenseStatus = status;
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('license-status-changed', status);
+        }
+        updateTrayMenu(currentLightState);
+      }).catch(() => {});
+    }
+    res.resume();
+  });
+  req.on('error', () => {
+    const wasOnline = isOnline;
+    isOnline = false;
+    if (wasOnline && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('connectivity-changed', false);
+    }
+    // If offline for >= 48h, send warning; >= 72h, lock
+    const offlineDuration = Date.now() - lastOnlineTime;
+    const offlineHours = offlineDuration / 3600000;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('offline-duration-update', offlineHours);
+    }
+  });
+  req.on('timeout', () => req.destroy());
+  req.end();
+}
+
+function startConnectivityMonitor() {
+  if (connectivityCheckInterval) clearInterval(connectivityCheckInterval);
+  checkConnectivity();
+  connectivityCheckInterval = setInterval(checkConnectivity, 30000); // Check every 30s
+}
+
+function stopConnectivityMonitor() {
+  if (connectivityCheckInterval) {
+    clearInterval(connectivityCheckInterval);
+    connectivityCheckInterval = null;
+  }
+}
+
 let mainWindow = null;
 let tray = null;
 let currentLightState = true;
@@ -372,6 +427,176 @@ ipcMain.handle('open-external', async (event, url) => {
   return false;
 });
 
+// ── IN-APP PAYMENT WINDOW ─────────────────────────────────────────
+// Opens Razorpay payment inside a dedicated foreground window.
+// Temporarily demotes mainWindow's topmost status so the payment window
+// is NEVER hidden behind the setup wizard or buying options.
+let paymentWindow = null;
+
+ipcMain.handle('open-payment-window', async (event, params) => {
+  const { url, planId, hwid } = params || {};
+  if (!url || !url.startsWith('http')) return { success: false, error: 'Invalid URL' };
+
+  // Close any existing payment window
+  if (paymentWindow && !paymentWindow.isDestroyed()) {
+    paymentWindow.close();
+    paymentWindow = null;
+  }
+
+  return new Promise((resolve) => {
+    // 1. Temporarily pause keepTop on mainWindow and demote it below payment window
+    stopKeepTop();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.setAlwaysOnTop(false);
+    }
+
+    const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
+    const winW = Math.min(640, sw - 40);
+    const winH = Math.min(820, sh - 40);
+
+    paymentWindow = new BrowserWindow({
+      width: winW,
+      height: winH,
+      x: Math.round((sw - winW) / 2),
+      y: Math.round((sh - winH) / 2),
+      title: 'Edge Light — Secure Payment Checkout',
+      frame: true,
+      transparent: false,
+      alwaysOnTop: true,
+      resizable: true,
+      minimizable: true,
+      maximizable: true,
+      show: true,
+      backgroundColor: '#111827',
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        sandbox: true
+      }
+    });
+
+    paymentWindow.setMenuBarVisibility(false);
+    paymentWindow.setAlwaysOnTop(true, 'screen-saver', 9999);
+    paymentWindow.moveTop();
+    paymentWindow.focus();
+
+    // Ensure paymentWindow stays above all else when focused
+    paymentWindow.on('focus', () => {
+      if (paymentWindow && !paymentWindow.isDestroyed()) {
+        paymentWindow.setAlwaysOnTop(true, 'screen-saver', 9999);
+        paymentWindow.moveTop();
+      }
+    });
+
+    const restoreMainWindow = () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.setAlwaysOnTop(true, 'screen-saver', 1);
+        mainWindow.moveTop();
+        startKeepTop();
+      }
+    };
+
+    let resolved = false;
+
+    function safeResolve(result) {
+      if (!resolved) {
+        resolved = true;
+        restoreMainWindow();
+        resolve(result);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('payment-window-closed', result);
+        }
+      }
+    }
+
+    // Check for success/failure URL patterns after navigation
+    paymentWindow.webContents.on('did-navigate', (e, navUrl) => {
+      const lower = navUrl.toLowerCase();
+      if (
+        lower.includes('payment_id=') ||
+        lower.includes('razorpay_payment_id') ||
+        lower.includes('success') ||
+        lower.includes('payment-success') ||
+        lower.includes('order_id=')
+      ) {
+        safeResolve({ success: true, url: navUrl, planId });
+        setTimeout(() => {
+          if (paymentWindow && !paymentWindow.isDestroyed()) paymentWindow.close();
+        }, 1500);
+      }
+    });
+
+    // Also watch for URL changes in-frame (SPA Razorpay checkout)
+    paymentWindow.webContents.on('did-navigate-in-page', (e, navUrl) => {
+      const lower = navUrl.toLowerCase();
+      if (lower.includes('payment_id=') || lower.includes('razorpay_payment_id=')) {
+        safeResolve({ success: true, url: navUrl, planId });
+        setTimeout(() => {
+          if (paymentWindow && !paymentWindow.isDestroyed()) paymentWindow.close();
+        }, 1500);
+      }
+    });
+
+    paymentWindow.on('closed', () => {
+      paymentWindow = null;
+      restoreMainWindow();
+      safeResolve({ success: false, closed: true });
+    });
+
+    // Notify renderer that payment window is open so it can show active state
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('payment-window-opened', { planId, url });
+    }
+
+    paymentWindow.loadURL(url);
+  });
+});
+
+ipcMain.handle('focus-payment-window', () => {
+  if (paymentWindow && !paymentWindow.isDestroyed()) {
+    paymentWindow.show();
+    paymentWindow.setAlwaysOnTop(true, 'screen-saver', 9999);
+    paymentWindow.moveTop();
+    paymentWindow.focus();
+    return true;
+  }
+  return false;
+});
+
+ipcMain.handle('close-payment-window', () => {
+  if (paymentWindow && !paymentWindow.isDestroyed()) {
+    paymentWindow.close();
+    paymentWindow = null;
+    return true;
+  }
+  return false;
+});
+
+ipcMain.handle('open-payment-in-browser', async (event, url) => {
+  if (paymentWindow && !paymentWindow.isDestroyed()) {
+    paymentWindow.close();
+    paymentWindow = null;
+  }
+  if (typeof url === 'string' && (url.startsWith('https://') || url.startsWith('http://'))) {
+    await shell.openExternal(url);
+    return true;
+  }
+  return false;
+});
+
+ipcMain.handle('get-connectivity-status', () => {
+  return {
+    isOnline,
+    lastOnlineTime,
+    offlineHours: isOnline ? 0 : (Date.now() - lastOnlineTime) / 3600000
+  };
+});
+
+ipcMain.handle('force-connectivity-check', async () => {
+  checkConnectivity();
+  return { isOnline, lastOnlineTime };
+});
+
 ipcMain.handle('create-razorpay-link', async (event, params) => {
   try {
     const planId = params?.planId || 'quarterly';
@@ -644,6 +869,7 @@ app.whenReady().then(async () => {
   createTray();
   registerShortcuts();
   startWebcamMonitoring();
+  startConnectivityMonitor();
   setLaunchAtLogin(true);
 
   app.on('activate', () => {
@@ -657,6 +883,7 @@ app.on('will-quit', () => {
   licenseManager.stop();
   stopKeepTop();
   stopWebcamMonitoring();
+  stopConnectivityMonitor();
   globalShortcut.unregisterAll();
 });
 

@@ -8,8 +8,11 @@ const { spawn } = require('child_process');
 
 class AppUpdater {
   constructor(options = {}) {
-    this.checkUrl = options.checkUrl || 'https://edgelight-backend.vercel.app/api/updates/latest';
-    this.fallbackUrl = options.fallbackUrl || 'https://api.github.com/repos/CHAUHANRUDRA24/edgelight-app/releases/latest';
+    // Primary: GitHub Releases API (always available, no server deployment needed)
+    this.checkUrl = options.checkUrl || 'https://api.github.com/repos/CHAUHANRUDRA24/edgelight-app/releases/latest';
+    // Secondary: backend manifest endpoint
+    this.fallbackUrl = options.fallbackUrl || 'https://edgelight-backend.vercel.app/api/updates/latest';
+    this.currentVersion = options.currentVersion || null;
     this.downloadedFilePath = null;
     this.downloadInProgress = false;
     this.currentUpdateInfo = null;
@@ -45,7 +48,7 @@ class AppUpdater {
 
       const req = client.get(url, {
         headers: {
-          'User-Agent': 'EdgeLight-Desktop-Updater/' + (app?.getVersion ? app.getVersion() : '1.0.4'),
+          'User-Agent': 'EdgeLight-Desktop-Updater/' + (app?.getVersion ? app.getVersion() : '1.0.6'),
           'Accept': 'application/json'
         },
         timeout: 6000
@@ -76,29 +79,41 @@ class AppUpdater {
     });
   }
 
-  // Check for updates
   async checkForUpdates() {
-    const currentVersion = app?.getVersion ? app.getVersion() : '1.0.4';
+    let currentVersion = this.currentVersion;
+    if (!currentVersion) {
+      try {
+        currentVersion = app?.getVersion ? app.getVersion() : require('../package.json').version;
+      } catch (e) {
+        currentVersion = '1.0.6';
+      }
+    }
 
     try {
-      // 1. Try primary backend update endpoint
       let manifest = null;
+
+      // 1. Primary: GitHub Releases API
       try {
-        manifest = await this.fetchJson(this.checkUrl);
-      } catch (e) {
-        // Fallback to GitHub releases API
+        const ghRelease = await this.fetchJson(this.checkUrl);
+        if (ghRelease && ghRelease.tag_name) {
+          const setupAsset = ghRelease.assets?.find(a => a.name.endsWith('.exe') && a.name.toLowerCase().includes('setup'))
+            || ghRelease.assets?.find(a => a.name.endsWith('.exe'));
+          const version = ghRelease.tag_name.replace(/^v/i, '');
+          manifest = {
+            version,
+            releaseDate: ghRelease.published_at,
+            notes: ghRelease.body || '✨ Edge Light update with new features and improvements.',
+            downloadUrl: setupAsset?.browser_download_url
+              || `https://github.com/CHAUHANRUDRA24/edgelight-app/releases/download/${ghRelease.tag_name}/Edge.Light.Setup.${version}.exe`
+          };
+        } else if (ghRelease && ghRelease.version) {
+          manifest = ghRelease;
+        }
+      } catch (ghErr) {
+        // 2. Fallback: backend manifest endpoint
         try {
-          const ghRelease = await this.fetchJson(this.fallbackUrl);
-          if (ghRelease && ghRelease.tag_name) {
-            const setupAsset = ghRelease.assets?.find(a => a.name.endsWith('.exe') && a.name.toLowerCase().includes('setup')) || ghRelease.assets?.find(a => a.name.endsWith('.exe'));
-            manifest = {
-              version: ghRelease.tag_name.replace(/^v/i, ''),
-              releaseDate: ghRelease.published_at,
-              notes: ghRelease.body || '✨ Edge Light update with optical and performance improvements.',
-              downloadUrl: setupAsset?.browser_download_url || `https://github.com/CHAUHANRUDRA24/edgelight-app/releases/download/${ghRelease.tag_name}/Edge.Light.Setup.${ghRelease.tag_name}.exe`
-            };
-          }
-        } catch (ghErr) {}
+          manifest = await this.fetchJson(this.fallbackUrl);
+        } catch (e) {}
       }
 
       if (!manifest || !manifest.version) {

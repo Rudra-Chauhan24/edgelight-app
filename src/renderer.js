@@ -1565,6 +1565,10 @@
         licenseBadge.textContent = 'Blocked';
         licenseBadge.classList.add('rejected');
         licenseBadge.title = 'Device access revoked by administrator';
+      } else if (info.status === 'offline_locked') {
+        licenseBadge.textContent = '📡 Offline';
+        licenseBadge.classList.add('expired');
+        licenseBadge.title = 'Connect to internet to verify license';
       } else if (info.status === 'expired' || info.status === 'clock_tampered') {
         licenseBadge.textContent = 'Expired';
         licenseBadge.classList.add('expired');
@@ -1585,6 +1589,9 @@
       } else if (info.status === 'rejected' || info.status === 'revoked') {
         modalStatusBadge.textContent = '🚫 Device Access Revoked';
         modalStatusBadge.classList.add('rejected');
+      } else if (info.status === 'offline_locked') {
+        modalStatusBadge.textContent = '📡 Offline — Connect to verify license';
+        modalStatusBadge.classList.add('expired');
       } else if (info.status === 'expired') {
         modalStatusBadge.textContent = '⌛ 3-Day Free Trial Expired';
         modalStatusBadge.classList.add('expired');
@@ -1884,15 +1891,20 @@
     });
   });
 
-  razorpayDirectBtn?.addEventListener('click', async () => {
+  const openBrowserTabBtn = document.getElementById('openBrowserTabBtn');
+  const checkoutActiveBanner = document.getElementById('checkoutActiveBanner');
+  const cabBringFrontBtn = document.getElementById('cabBringFrontBtn');
+  const cabOpenBrowserBtn = document.getElementById('cabOpenBrowserBtn');
+  const cabCancelBtn = document.getElementById('cabCancelBtn');
+  let activePaymentUrl = null;
+
+  async function resolvePaymentUrl() {
     const plansSource = paymentConfig.plansById || (Array.isArray(paymentConfig.plans)
       ? paymentConfig.plans.reduce((acc, p) => { acc[p.id] = p; return acc; }, {})
       : paymentConfig.plans);
     const plan = plansSource?.[currentSelectedPlanId] || plansSource?.quarterly || {};
     let url = plan.link || 'https://rzp.io/rzp/01mOm4K';
     const hwid = wizardHwidCode?.textContent || licenseState.hwid || '';
-
-    showStatus(`⚡ Launching Razorpay checkout (₹${plan.price || 49})…`, 3000);
 
     if (window.edgeLightAPI?.createRazorpayPaymentLink) {
       try {
@@ -1907,13 +1919,205 @@
         console.warn('[Razorpay] Dynamic checkout link fallback:', err);
       }
     }
+    return { url, plan, hwid };
+  }
 
-    if (window.edgeLightAPI?.openExternal) {
+  razorpayDirectBtn?.addEventListener('click', async () => {
+    const { url, plan, hwid } = await resolvePaymentUrl();
+    activePaymentUrl = url;
+
+    // ── OPEN IN-APP PAYMENT WINDOW (GUARANTEED TOPMOST & FOCUSED) ──
+    showStatus(`⚡ Opening secure payment window (₹${plan.price || 49})…`, 3000);
+    razorpayDirectBtn.disabled = true;
+    razorpayDirectBtn.textContent = '⏳ Payment window open…';
+    if (checkoutActiveBanner) checkoutActiveBanner.classList.remove('hidden');
+
+    try {
+      if (window.edgeLightAPI?.openPaymentWindow) {
+        const result = await window.edgeLightAPI.openPaymentWindow({
+          url,
+          planId: currentSelectedPlanId,
+          hwid
+        });
+        if (result && result.success) {
+          startPaymentActivationPolling(currentSelectedPlanId);
+        }
+      } else {
+        // Fallback: external browser if API not available
+        if (window.edgeLightAPI?.openExternal) {
+          await window.edgeLightAPI.openExternal(url);
+        } else {
+          window.open(url, '_blank');
+        }
+        startPaymentActivationPolling(currentSelectedPlanId);
+      }
+    } catch (err) {
+      console.warn('[Payment] Window error:', err);
+      showStatus('Payment window error. Retrying…', 2000);
+    } finally {
+      razorpayDirectBtn.disabled = false;
+      razorpayDirectBtn.innerHTML = `<span class="rzp-icon">⚡</span> Pay <span id="rzpBtnPrice">₹${plan.price || 49}</span> with Razorpay`;
+      if (checkoutActiveBanner) checkoutActiveBanner.classList.add('hidden');
+    }
+  });
+
+  // Open payment link directly in default browser tab (Chrome/Edge/Firefox)
+  openBrowserTabBtn?.addEventListener('click', async () => {
+    const { url, plan } = await resolvePaymentUrl();
+    showStatus(`🌐 Opening checkout in your browser tab (₹${plan.price || 49})…`, 3500);
+    if (window.edgeLightAPI?.openPaymentInBrowser) {
+      await window.edgeLightAPI.openPaymentInBrowser(url);
+    } else if (window.edgeLightAPI?.openExternal) {
       await window.edgeLightAPI.openExternal(url);
     } else {
       window.open(url, '_blank');
     }
+    startPaymentActivationPolling(currentSelectedPlanId);
   });
+
+  // Active banner action controls
+  cabBringFrontBtn?.addEventListener('click', async () => {
+    if (window.edgeLightAPI?.focusPaymentWindow) {
+      await window.edgeLightAPI.focusPaymentWindow();
+    }
+  });
+
+  cabOpenBrowserBtn?.addEventListener('click', async () => {
+    const url = activePaymentUrl || (await resolvePaymentUrl()).url;
+    if (window.edgeLightAPI?.openPaymentInBrowser) {
+      await window.edgeLightAPI.openPaymentInBrowser(url);
+    } else if (window.edgeLightAPI?.openExternal) {
+      await window.edgeLightAPI.openExternal(url);
+    }
+    if (checkoutActiveBanner) checkoutActiveBanner.classList.add('hidden');
+    startPaymentActivationPolling(currentSelectedPlanId);
+  });
+
+  cabCancelBtn?.addEventListener('click', async () => {
+    if (window.edgeLightAPI?.closePaymentWindow) {
+      await window.edgeLightAPI.closePaymentWindow();
+    }
+    if (checkoutActiveBanner) checkoutActiveBanner.classList.add('hidden');
+    razorpayDirectBtn.disabled = false;
+    const plansSource = paymentConfig.plansById || paymentConfig.plans;
+    const plan = plansSource?.[currentSelectedPlanId] || plansSource?.quarterly || {};
+    razorpayDirectBtn.innerHTML = `<span class="rzp-icon">⚡</span> Pay <span id="rzpBtnPrice">₹${plan.price || 49}</span> with Razorpay`;
+  });
+
+  // ── POST-PAYMENT LICENSE ACTIVATION POLLING ────────────────────────
+  // After user pays, poll Firestore every 4s up to 10 minutes waiting
+  // for the admin/webhook to set status='approved' in Firestore.
+  let paymentPollInterval = null;
+  let paymentPollTimeout = null;
+
+  function startPaymentActivationPolling(planId) {
+    stopPaymentActivationPolling();
+    showPaymentWaitingUI(planId);
+
+    let pollCount = 0;
+    const MAX_POLLS = 150; // 150 × 4s = 10 minutes
+
+    paymentPollInterval = setInterval(async () => {
+      pollCount++;
+      if (pollCount > MAX_POLLS) {
+        stopPaymentActivationPolling();
+        hidePaymentWaitingUI();
+        showStatus('⏳ Payment not yet confirmed. Check back later or contact support.', 5000);
+        return;
+      }
+
+      try {
+        if (window.edgeLightAPI?.refreshLicenseInfo) {
+          const updated = await window.edgeLightAPI.refreshLicenseInfo();
+          if (updated && updated.isAuthorized && updated.status === 'approved') {
+            stopPaymentActivationPolling();
+            hidePaymentWaitingUI();
+            updateLicenseUI(updated);
+            showPaymentSuccessUI(updated);
+          }
+        }
+      } catch (e) {}
+    }, 4000);
+  }
+
+  function stopPaymentActivationPolling() {
+    if (paymentPollInterval) { clearInterval(paymentPollInterval); paymentPollInterval = null; }
+    if (paymentPollTimeout) { clearTimeout(paymentPollTimeout); paymentPollTimeout = null; }
+  }
+
+  // ── PAYMENT WAITING UI ─────────────────────────────────────────────
+  let paymentWaitingOverlay = null;
+
+  function showPaymentWaitingUI(planId) {
+    if (paymentWaitingOverlay) return;
+    paymentWaitingOverlay = document.createElement('div');
+    paymentWaitingOverlay.id = 'payment-waiting-overlay';
+    paymentWaitingOverlay.innerHTML = `
+      <div class="pwait-card">
+        <div class="pwait-spinner"></div>
+        <h3 class="pwait-title">Waiting for Payment Confirmation</h3>
+        <p class="pwait-msg">Once your payment is processed, your license will activate automatically.<br>
+        <strong>Do not close this window.</strong></p>
+        <div class="pwait-dots"><span></span><span></span><span></span></div>
+        <button class="pwait-cancel-btn" id="payWaitCancelBtn">Cancel / Close</button>
+      </div>
+    `;
+    document.body.appendChild(paymentWaitingOverlay);
+    setTimeout(() => paymentWaitingOverlay?.classList.add('visible'), 10);
+    document.getElementById('payWaitCancelBtn')?.addEventListener('click', () => {
+      stopPaymentActivationPolling();
+      hidePaymentWaitingUI();
+    });
+  }
+
+  function hidePaymentWaitingUI() {
+    if (paymentWaitingOverlay) {
+      paymentWaitingOverlay.classList.remove('visible');
+      setTimeout(() => { paymentWaitingOverlay?.remove(); paymentWaitingOverlay = null; }, 400);
+    }
+  }
+
+  // ── PAYMENT SUCCESS UI ─────────────────────────────────────────────
+  function showPaymentSuccessUI(licInfo) {
+    const overlay = document.createElement('div');
+    overlay.id = 'payment-success-overlay';
+    overlay.innerHTML = `
+      <div class="psuccess-card">
+        <div class="psuccess-icon">🎉</div>
+        <h2 class="psuccess-title">License Activated!</h2>
+        <p class="psuccess-plan">${licInfo.planName || 'Pro License'}</p>
+        <p class="psuccess-msg">Your Edge Light is now fully licensed on this device.<br>
+        Hardware ID: <code>${licInfo.hwid || ''}</code></p>
+        <button class="primary-btn" id="paySuccessCloseBtn">✨ Start Using Edge Light</button>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    setTimeout(() => overlay.classList.add('visible'), 10);
+    document.getElementById('paySuccessCloseBtn')?.addEventListener('click', () => {
+      overlay.classList.remove('visible');
+      setTimeout(() => overlay.remove(), 400);
+      hideSetupWizard();
+      hideLicenseModal();
+      showStatus('✓ Pro License Active — Edge Light unlocked!', 4000);
+    });
+  }
+
+  // Listen for payment window events (from main process)
+  if (window.edgeLightAPI?.onPaymentWindowOpened) {
+    window.edgeLightAPI.onPaymentWindowOpened((data) => {
+      if (data?.url) activePaymentUrl = data.url;
+      if (checkoutActiveBanner) checkoutActiveBanner.classList.remove('hidden');
+    });
+  }
+
+  if (window.edgeLightAPI?.onPaymentWindowClosed) {
+    window.edgeLightAPI.onPaymentWindowClosed((result) => {
+      if (checkoutActiveBanner) checkoutActiveBanner.classList.add('hidden');
+      if (result && result.success) {
+        startPaymentActivationPolling(result.planId);
+      }
+    });
+  }
 
   wizardCopyHwidBtn?.addEventListener('click', async (e) => {
     e.stopPropagation();
@@ -2000,6 +2204,77 @@
   window.__hideSetupWizard = hideSetupWizard;
   window.__updateLicenseUI = updateLicenseUI;
 
+  // ── OFFLINE LOCK ENFORCEMENT ───────────────────────────────────────
+  let offlineLockOverlay = null;
+
+  function showOfflineLockScreen(offlineHours) {
+    if (offlineLockOverlay) {
+      // Update hours display
+      const el = offlineLockOverlay.querySelector('#offlineHoursDisplay');
+      if (el) el.textContent = `${Math.floor(offlineHours)} hours`;
+      return;
+    }
+    offlineLockOverlay = document.createElement('div');
+    offlineLockOverlay.id = 'offline-lock-overlay';
+    offlineLockOverlay.innerHTML = `
+      <div class="offline-lock-card">
+        <div class="offline-lock-icon">📡</div>
+        <h2 class="offline-lock-title">Connect to Internet to Continue</h2>
+        <p class="offline-lock-msg">
+          Edge Light has been offline for <strong id="offlineHoursDisplay">${Math.floor(offlineHours)} hours</strong>.
+          License verification requires periodic internet connectivity.
+        </p>
+        <p class="offline-lock-sub">Please connect to the internet and Edge Light will resume automatically.</p>
+        <div class="offline-lock-spinner"><span></span><span></span><span></span></div>
+        <button class="primary-btn" id="offlineRetryBtn">🔄 Check Connection Now</button>
+      </div>
+    `;
+    document.body.appendChild(offlineLockOverlay);
+    setTimeout(() => offlineLockOverlay?.classList.add('visible'), 10);
+    setClickThrough(false);
+    // Turn off the light
+    if (state.on) setOn(false);
+    document.getElementById('offlineRetryBtn')?.addEventListener('click', async () => {
+      if (window.edgeLightAPI?.forceConnectivityCheck) {
+        await window.edgeLightAPI.forceConnectivityCheck();
+      }
+    });
+  }
+
+  function hideOfflineLockScreen() {
+    if (offlineLockOverlay) {
+      offlineLockOverlay.classList.remove('visible');
+      setTimeout(() => { offlineLockOverlay?.remove(); offlineLockOverlay = null; }, 400);
+      if (!isAnyModalOpen() && !bar.classList.contains('visible')) {
+        setClickThrough(true);
+      }
+    }
+  }
+
+  // Handle connectivity changes
+  if (window.edgeLightAPI?.onConnectivityChanged) {
+    window.edgeLightAPI.onConnectivityChanged((online) => {
+      if (online) {
+        hideOfflineLockScreen();
+        showStatus('✓ Connected — License verified', 2500);
+      }
+    });
+  }
+
+  // Handle offline duration updates from main process
+  if (window.edgeLightAPI?.onOfflineDurationUpdate) {
+    window.edgeLightAPI.onOfflineDurationUpdate((offlineHours) => {
+      // Only enforce for approved/paid licenses
+      if (licenseState.status === 'approved' || licenseState.status === 'offline_locked') {
+        if (offlineHours >= 72) {
+          showOfflineLockScreen(offlineHours);
+        } else if (offlineHours >= 48 && !offlineLockOverlay) {
+          showStatus(`⚠️ Offline for ${Math.floor(offlineHours)}h — Connect to internet soon`, 5000);
+        }
+      }
+    });
+  }
+
   // Initialize license status from Electron main process
   if (window.edgeLightAPI?.getLicenseInfo) {
     window.edgeLightAPI.getLicenseInfo().then((info) => {
@@ -2010,6 +2285,12 @@
   if (window.edgeLightAPI?.onLicenseStatusChanged) {
     window.edgeLightAPI.onLicenseStatusChanged((info) => {
       updateLicenseUI(info);
+      // Handle offline lock status
+      if (info && info.status === 'offline_locked') {
+        showOfflineLockScreen(info.offlineHours || 72);
+      } else if (offlineLockOverlay && info && info.isAuthorized) {
+        hideOfflineLockScreen();
+      }
     });
   }
 
@@ -2032,10 +2313,10 @@
       window.edgeLightAPI.getAppVersion().then((ver) => {
         if (ver) versionBadgeEl.textContent = `v${ver}`;
       }).catch(() => {
-        versionBadgeEl.textContent = 'v1.0.4';
+        versionBadgeEl.textContent = 'v1.0.5';
       });
     } else {
-      versionBadgeEl.textContent = 'v1.0.4';
+      versionBadgeEl.textContent = 'v1.0.5';
     }
   }
 

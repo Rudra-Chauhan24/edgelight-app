@@ -75,5 +75,33 @@ contextBridge.exposeInMainWorld('edgeLightAPI', {
     const subscription = (_event, progress) => callback(progress);
     ipcRenderer.on('update-download-progress', subscription);
     return () => ipcRenderer.removeListener('update-download-progress', subscription);
+  },
+  // In-app payment window (Razorpay inside Electron BrowserWindow, not external browser)
+  openPaymentWindow: (params) => ipcRenderer.invoke('open-payment-window', params),
+  focusPaymentWindow: () => ipcRenderer.invoke('focus-payment-window'),
+  closePaymentWindow: () => ipcRenderer.invoke('close-payment-window'),
+  openPaymentInBrowser: (url) => ipcRenderer.invoke('open-payment-in-browser', url),
+  onPaymentWindowOpened: (callback) => {
+    const subscription = (_event, data) => callback(data);
+    ipcRenderer.on('payment-window-opened', subscription);
+    return () => ipcRenderer.removeListener('payment-window-opened', subscription);
+  },
+  onPaymentWindowClosed: (callback) => {
+    const subscription = (_event, result) => callback(result);
+    ipcRenderer.on('payment-window-closed', subscription);
+    return () => ipcRenderer.removeListener('payment-window-closed', subscription);
+  },
+  // Internet connectivity APIs
+  getConnectivityStatus: () => ipcRenderer.invoke('get-connectivity-status'),
+  forceConnectivityCheck: () => ipcRenderer.invoke('force-connectivity-check'),
+  onConnectivityChanged: (callback) => {
+    const subscription = (_event, online) => callback(online);
+    ipcRenderer.on('connectivity-changed', subscription);
+    return () => ipcRenderer.removeListener('connectivity-changed', subscription);
+  },
+  onOfflineDurationUpdate: (callback) => {
+    const subscription = (_event, hours) => callback(hours);
+    ipcRenderer.on('offline-duration-update', subscription);
+    return () => ipcRenderer.removeListener('offline-duration-update', subscription);
   }
 });

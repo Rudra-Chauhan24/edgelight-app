@@ -1321,11 +1321,18 @@ input[type="range"]:focus-visible,
   max-width: 440px;
 }
 
+.checkout-action-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .razorpay-btn {
   font-size: 13.5px;
   font-weight: 700;
-  padding: 12px 28px;
-  min-width: 240px;
+  padding: 12px 24px;
+  min-width: 220px;
   border-radius: 10px;
   background: linear-gradient(135deg, #ff9f43 0%, #ff5252 100%);
   border: 1px solid rgba(255, 178, 102, 0.5);
@@ -1349,9 +1356,137 @@ input[type="range"]:focus-visible,
   transform: scale(0.98);
 }
 
-.razorpay-btn:hover {
-  filter: brightness(1.15);
-  box-shadow: 0 6px 18px rgba(2, 132, 199, 0.5);
+.browser-pay-btn {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 11px 18px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #e2e8f0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: all 150ms ease;
+  white-space: nowrap;
+}
+
+.browser-pay-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.35);
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.browser-pay-btn:active {
+  transform: scale(0.98);
+}
+
+/* ── Checkout Active Window Banner ── */
+.checkout-active-banner {
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid rgba(255, 178, 102, 0.4);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), 0 0 16px rgba(255, 159, 67, 0.15);
+  border-radius: 12px;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 6px;
+  animation: slideInDown 0.25s ease-out;
+}
+
+.checkout-active-banner.hidden {
+  display: none !important;
+}
+
+.cab-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.cab-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2.5px solid rgba(255, 178, 102, 0.2);
+  border-top-color: #ff9f43;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+.cab-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cab-text strong {
+  font-size: 13px;
+  color: #ffb266;
+  font-weight: 700;
+}
+
+.cab-text span {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.7);
+  line-height: 1.35;
+}
+
+.cab-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cab-btn {
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 150ms ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cab-btn.primary {
+  background: #ff9f43;
+  color: #000;
+  border: none;
+  font-weight: 700;
+}
+
+.cab-btn.primary:hover {
+  background: #ffb266;
+  transform: translateY(-1px);
+}
+
+.cab-btn.secondary {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+}
+
+.cab-btn.secondary:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.cab-btn.cancel {
+  background: transparent;
+  border: 1px solid rgba(255, 80, 80, 0.35);
+  color: #ff7777;
+  margin-left: auto;
+}
+
+.cab-btn.cancel:hover {
+  background: rgba(255, 80, 80, 0.12);
+  color: #ff9999;
 }
 
 .rzp-icon {
@@ -1636,5 +1771,245 @@ input[type="range"]:focus-visible,
   background: rgba(255, 255, 255, 0.15);
 }
 
+/* ── PAYMENT WAITING OVERLAY ─────────────────────────────────────── */
+#payment-waiting-overlay,
+#payment-success-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9900;
+  background: rgba(0, 0, 0, 0.82);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.35s ease;
+  pointer-events: all;
+}
 
+#payment-waiting-overlay.visible,
+#payment-success-overlay.visible {
+  opacity: 1;
+}
 
+.pwait-card,
+.psuccess-card {
+  background: linear-gradient(145deg, rgba(30, 24, 16, 0.98), rgba(18, 14, 8, 0.98));
+  border: 1px solid rgba(255, 178, 102, 0.25);
+  border-radius: 20px;
+  padding: 40px 36px;
+  max-width: 420px;
+  width: 90%;
+  text-align: center;
+  box-shadow:
+    0 30px 80px rgba(0, 0, 0, 0.7),
+    0 0 40px rgba(255, 178, 102, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+/* Spinning loader circle */
+.pwait-spinner {
+  width: 52px;
+  height: 52px;
+  border: 3px solid rgba(255, 178, 102, 0.15);
+  border-top-color: #ffb266;
+  border-radius: 50%;
+  animation: spinLoader 0.9s linear infinite;
+}
+
+@keyframes spinLoader {
+  to { transform: rotate(360deg); }
+}
+
+.pwait-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: #fff;
+  margin: 0;
+}
+
+.pwait-msg {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.65);
+  line-height: 1.6;
+  margin: 0;
+}
+
+.pwait-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.pwait-dots span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ffb266;
+  animation: dotPulse 1.2s ease-in-out infinite;
+}
+
+.pwait-dots span:nth-child(2) { animation-delay: 0.2s; }
+.pwait-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes dotPulse {
+  0%, 100% { opacity: 0.3; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.2); }
+}
+
+.pwait-cancel-btn {
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.55);
+  border-radius: 8px;
+  padding: 8px 20px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-top: 4px;
+}
+
+.pwait-cancel-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.8);
+}
+
+/* ── PAYMENT SUCCESS OVERLAY ─────────────────────────────────────── */
+.psuccess-icon {
+  font-size: 52px;
+  animation: successBounce 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes successBounce {
+  0% { transform: scale(0); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.psuccess-title {
+  font-size: 22px;
+  font-weight: 800;
+  color: #fff;
+  background: linear-gradient(135deg, #ffb266, #ff8c42);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  margin: 0;
+}
+
+.psuccess-plan {
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(255, 178, 102, 0.9);
+  background: rgba(255, 178, 102, 0.1);
+  border: 1px solid rgba(255, 178, 102, 0.2);
+  padding: 6px 16px;
+  border-radius: 999px;
+  margin: 0;
+}
+
+.psuccess-msg {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.6);
+  line-height: 1.6;
+  margin: 0;
+}
+
+.psuccess-msg code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: #ffb266;
+  background: rgba(255, 178, 102, 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+/* ── OFFLINE LOCK SCREEN ─────────────────────────────────────────── */
+#offline-lock-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9950;
+  background: rgba(0, 0, 0, 0.92);
+  backdrop-filter: blur(24px) saturate(0.5);
+  -webkit-backdrop-filter: blur(24px) saturate(0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  pointer-events: all;
+}
+
+#offline-lock-overlay.visible {
+  opacity: 1;
+}
+
+.offline-lock-card {
+  background: linear-gradient(160deg, rgba(12, 18, 30, 0.99), rgba(8, 10, 18, 0.99));
+  border: 1px solid rgba(100, 160, 255, 0.2);
+  border-radius: 24px;
+  padding: 48px 40px;
+  max-width: 440px;
+  width: 90%;
+  text-align: center;
+  box-shadow:
+    0 40px 100px rgba(0, 0, 0, 0.8),
+    0 0 60px rgba(60, 120, 255, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+}
+
+.offline-lock-icon {
+  font-size: 56px;
+  animation: pulseIcon 2s ease-in-out infinite;
+}
+
+@keyframes pulseIcon {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.08); opacity: 0.8; }
+}
+
+.offline-lock-title {
+  font-size: 20px;
+  font-weight: 800;
+  color: #fff;
+  margin: 0;
+}
+
+.offline-lock-msg {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.6);
+  line-height: 1.65;
+  margin: 0;
+}
+
+.offline-lock-msg strong {
+  color: #85c1ff;
+}
+
+.offline-lock-sub {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.38);
+  margin: 0;
+}
+
+.offline-lock-spinner {
+  display: flex;
+  gap: 6px;
+}
+
+.offline-lock-spinner span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #5b9bf8;
+  animation: dotPulse 1.5s ease-in-out infinite;
+}
+
+.offline-lock-spinner span:nth-child(2) { animation-delay: 0.3s; }
+.offline-lock-spinner span:nth-child(3) { animation-delay: 0.6s; }

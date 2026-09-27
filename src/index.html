@@ -17,7 +17,7 @@
     <div class="ota-content">
       <span class="ota-sparkle">✨</span>
       <div class="ota-text">
-        <span>Edge Light <strong id="ota-version">v1.0.5</strong> is ready!</span>
+        <span>Edge Light <strong id="ota-version">v1.0.6</strong> is ready!</span>
       </div>
       <div id="ota-progress-box" class="ota-progress-box hidden">
         <div id="ota-progress-fill" class="ota-progress-fill"></div>
@@ -254,9 +254,30 @@
               </div>
               <p class="checkout-help">Click below to pay securely via Razorpay (UPI, Google Pay, PhonePe, Paytm, Cards, NetBanking, Wallets).</p>
               
-              <button type="button" class="primary-btn razorpay-btn" id="razorpayDirectBtn">
-                <span class="rzp-icon">⚡</span> Pay <span id="rzpBtnPrice">₹49</span> with Razorpay
-              </button>
+              <div class="checkout-action-row">
+                <button type="button" class="primary-btn razorpay-btn" id="razorpayDirectBtn">
+                  <span class="rzp-icon">⚡</span> Pay <span id="rzpBtnPrice">₹49</span> with Razorpay
+                </button>
+                <button type="button" class="secondary-btn browser-pay-btn" id="openBrowserTabBtn" title="Open payment link in your default web browser tab">
+                  🌐 Open in Browser Tab
+                </button>
+              </div>
+
+              <!-- Active Payment Window Controller Card -->
+              <div id="checkoutActiveBanner" class="checkout-active-banner hidden">
+                <div class="cab-header">
+                  <div class="cab-spinner"></div>
+                  <div class="cab-text">
+                    <strong>Payment Window is Active</strong>
+                    <span>Complete checkout in the popup window or switch to your browser tab.</span>
+                  </div>
+                </div>
+                <div class="cab-buttons">
+                  <button type="button" class="cab-btn primary" id="cabBringFrontBtn">🔼 Show Window</button>
+                  <button type="button" class="cab-btn secondary" id="cabOpenBrowserBtn">🌐 Open Browser Tab</button>
+                  <button type="button" class="cab-btn cancel" id="cabCancelBtn">✕ Cancel</button>
+                </div>
+              </div>
 
               <div class="hwid-checkout-tag">
                 <span>Hardware ID:</span> <code id="wizardHwidCode">XXXX-XXXX-XXXX-XXXX</code>
@@ -305,6 +326,22 @@
             <button type="button" class="primary-btn pulse-glow big-btn" id="finishWizardBtn">✨ Start Using Edge Light</button>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Top Floating OTA Update Notification Banner -->
+  <div id="ota-banner" class="ota-banner">
+    <div class="ota-content">
+      <span class="ota-sparkle">✨</span>
+      <div class="ota-text">Update available: <strong id="ota-version">v1.0.6</strong></div>
+      <div class="ota-progress-box hidden" id="ota-progress-box">
+        <div class="ota-progress-fill" id="ota-progress-fill"></div>
+        <span class="ota-progress-text" id="ota-progress-text">0%</span>
+      </div>
+      <div class="ota-actions">
+        <button type="button" class="ota-btn" id="ota-action-btn">Update Now</button>
+        <button type="button" class="ota-close-btn" id="ota-close-btn" title="Dismiss">✕</button>
       </div>
     </div>
   </div>

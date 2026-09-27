@@ -315,10 +315,35 @@ class LicenseManager {
     this.dailyAuditTimer = null;
     this._hasInitialized = false;
     this._dailyAuditCallback = null;
+    // Offline enforcement: max hours offline before locking
+    this.OFFLINE_LOCK_HOURS = 72; // 3 days
+    this.OFFLINE_WARN_HOURS = 48; // 2 days - warn user
   }
 
   getShortHWID() {
     return this.hwidInfo.shortHwid;
+  }
+
+  // Record that the user is currently online — update vault timestamp
+  recordOnline() {
+    let data = this.vault.read() || {};
+    data.lastOnlineTime = Date.now();
+    data.isCurrentlyOffline = false;
+    this.vault.write(data);
+  }
+
+  // Get offline enforcement status
+  getOfflineStatus() {
+    const data = this.vault.read() || {};
+    const lastOnline = data.lastOnlineTime || Date.now();
+    const offlineMs = Date.now() - lastOnline;
+    const offlineHours = offlineMs / 3600000;
+    return {
+      lastOnlineTime: lastOnline,
+      offlineHours,
+      isWarning: offlineHours >= this.OFFLINE_WARN_HOURS,
+      isLocked: offlineHours >= this.OFFLINE_LOCK_HOURS
+    };
   }
 
   getTelemetry() {
@@ -331,7 +356,7 @@ class LicenseManager {
       username: username,
       osVersion: `${os.type()} ${os.release()} (${os.arch()})`,
       arch: process.arch,
-      appVersion: app?.getVersion ? app.getVersion() : '1.0.4',
+      appVersion: app?.getVersion ? app.getVersion() : '1.0.5',
       lastActiveAt: new Date().toISOString()
     };
   }
@@ -354,6 +379,7 @@ class LicenseManager {
         planName: '3-Day Free Trial',
         firstLaunchTime: now,
         lastSeenTime: now,
+        lastOnlineTime: now,
         clockTampered: false,
         registeredAt: new Date().toISOString(),
         totalLaunches: 1,
@@ -363,6 +389,8 @@ class LicenseManager {
     } else if (!this._hasInitialized) {
       // Only increment total launches once on real app startup, not on every 30s background sync!
       data.totalLaunches = (data.totalLaunches || 1) + 1;
+      // Initialize lastOnlineTime if missing (migration)
+      if (!data.lastOnlineTime) data.lastOnlineTime = now;
     }
 
     // Anti-Clock Tampering Check:
@@ -560,6 +588,27 @@ class LicenseManager {
         message: 'Device access revoked by administrator.'
       };
       return this.currentStatus;
+    }
+
+    // Check offline enforcement for approved (paid) licenses only
+    // Trial users are allowed offline (they expire by time, not connectivity)
+    if (data.status === 'approved') {
+      const lastOnline = data.lastOnlineTime || now;
+      const offlineMs = Math.max(0, now - lastOnline);
+      const offlineHours = offlineMs / 3600000;
+
+      if (offlineHours >= this.OFFLINE_LOCK_HOURS) {
+        this.currentStatus = {
+          ...baseInfo,
+          isAuthorized: false,
+          status: 'offline_locked',
+          trialRemainingHours: 0,
+          trialRemainingDays: 0,
+          offlineHours: Math.floor(offlineHours),
+          message: `Offline for ${Math.floor(offlineHours)}h — Connect to internet to verify license`
+        };
+        return this.currentStatus;
+      }
     }
 
     if (data.status === 'approved') {
