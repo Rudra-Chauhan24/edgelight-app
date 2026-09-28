@@ -649,7 +649,10 @@ ipcMain.handle('create-razorpay-link', async (event, params) => {
     };
     const target = plans[planId] || plans.quarterly;
     const keyId = process.env.RAZORPAY_KEY_ID || 'rzp_live_TbF2T3PxIu4EAn';
-    const keySecret = process.env.RAZORPAY_KEY_SECRET || 'REDACTED_RAZORPAY_SECRET';
+    const keySecret = process.env.RAZORPAY_KEY_SECRET;
+    if (!keySecret) {
+      return { success: true, url: target.fallback, source: 'fallback' };
+    }
     const auth = Buffer.from(`${keyId}:${keySecret}`).toString('base64');
 
     const postData = JSON.stringify({

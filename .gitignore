@@ -10,8 +10,11 @@ build/
 
 # Environment variables & secrets
 .env
+.env.*
+!.env.example
 *.local
 *.dat
+scripts/test-razorpay-api.js
 
 # OS generated files
 Thumbs.db
