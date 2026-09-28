@@ -39,7 +39,7 @@ const ADMIN_SECRET  = config.ADMIN_SECRET || '';
 const pkgVersion = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')).version;
 const VERSION    = (process.argv[2] || pkgVersion).replace(/^v/i, '').trim();
 const DL_URL     = process.argv[3] ||
-  `https://github.com/CHAUHANRUDRA24/edgelight-app/releases/download/v${VERSION}/Edge.Light.Setup.${VERSION}.exe`;
+  `https://github.com/Rudra-Chauhan24/edgelight-app/releases/download/v${VERSION}/Edge.Light.Setup.${VERSION}.exe`;
 
 const RELEASE_NOTES = `⚡ Full Payment Flow & Z-Index Redesign:\n` +
   `• Redesigned window layering so payment options (UPI, GPay, PhonePe, QR, Cards) are never blocked or obscured.\n` +

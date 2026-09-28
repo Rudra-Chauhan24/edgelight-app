@@ -9,7 +9,7 @@ const { spawn } = require('child_process');
 class AppUpdater {
   constructor(options = {}) {
     // Primary: GitHub Releases API (always available, no server deployment needed)
-    this.checkUrl = options.checkUrl || 'https://api.github.com/repos/CHAUHANRUDRA24/edgelight-app/releases/latest';
+    this.checkUrl = options.checkUrl || 'https://api.github.com/repos/Rudra-Chauhan24/edgelight-app/releases/latest';
     // Secondary: backend manifest endpoint
     this.fallbackUrl = options.fallbackUrl || 'https://edgelight-backend.vercel.app/api/updates/latest';
     this.currentVersion = options.currentVersion || null;
