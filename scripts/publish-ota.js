@@ -41,10 +41,12 @@ const VERSION    = (process.argv[2] || pkgVersion).replace(/^v/i, '').trim();
 const DL_URL     = process.argv[3] ||
   `https://github.com/CHAUHANRUDRA24/edgelight-app/releases/download/v${VERSION}/Edge.Light.Setup.${VERSION}.exe`;
 
-const RELEASE_NOTES = `💳 Payment Window Layering Fix: Payment window now has topmost priority and is never covered by the buying options.\n` +
-  `🌐 Open in Browser Tab: Added direct option to complete checkout in your default web browser (Chrome/Edge).\n` +
-  `⚡ Active Checkout Banner: Controls to bring window to front or switch to browser tab.\n` +
-  `🔐 Auto License Activation: Automatically provisions and unlocks pro license whether paying in-app or browser.`;
+const RELEASE_NOTES = `⚡ Full Payment Flow & Z-Index Redesign:\n` +
+  `• Redesigned window layering so payment options (UPI, GPay, PhonePe, QR, Cards) are never blocked or obscured.\n` +
+  `• Added prominent "Pay via Web Browser" option to checkout in Chrome/Edge with zero overlay interference.\n` +
+  `• Added non-blocking floating payment status pill at screen bottom with 1-click status check & cancel.\n` +
+  `• Added quick plan selection and direct checkout inside Device License modal.\n` +
+  `• Automatic background license synchronization and instant activation on payment.`;
 
 const MANIFEST = {
   version:     VERSION,

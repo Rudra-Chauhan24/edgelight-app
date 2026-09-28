@@ -81,6 +81,18 @@ contextBridge.exposeInMainWorld('edgeLightAPI', {
   focusPaymentWindow: () => ipcRenderer.invoke('focus-payment-window'),
   closePaymentWindow: () => ipcRenderer.invoke('close-payment-window'),
   openPaymentInBrowser: (url) => ipcRenderer.invoke('open-payment-in-browser', url),
+  startPaymentSession: () => ipcRenderer.invoke('start-payment-session'),
+  endPaymentSession: () => ipcRenderer.invoke('end-payment-session'),
+  onPaymentSessionStarted: (callback) => {
+    const subscription = (_event, data) => callback(data);
+    ipcRenderer.on('payment-session-started', subscription);
+    return () => ipcRenderer.removeListener('payment-session-started', subscription);
+  },
+  onPaymentSessionEnded: (callback) => {
+    const subscription = (_event, data) => callback(data);
+    ipcRenderer.on('payment-session-ended', subscription);
+    return () => ipcRenderer.removeListener('payment-session-ended', subscription);
+  },
   onPaymentWindowOpened: (callback) => {
     const subscription = (_event, data) => callback(data);
     ipcRenderer.on('payment-window-opened', subscription);

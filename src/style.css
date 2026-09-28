@@ -816,6 +816,49 @@ input[type="range"]:focus-visible,
   padding: 10px 12px;
 }
 
+.license-plans-quick {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lpq-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.lpq-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.lpq-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.85);
+  border-radius: 8px;
+  padding: 7px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 150ms ease;
+  text-align: center;
+}
+
+.lpq-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 178, 102, 0.35);
+}
+
+.lpq-btn.active {
+  background: rgba(255, 159, 67, 0.2);
+  border-color: #ff9f43;
+  color: #ffb366;
+  box-shadow: 0 0 12px rgba(255, 159, 67, 0.25);
+}
+
 /* ── Common Buttons & Glow ────────────────────────────────────── */
 .primary-btn {
   background: linear-gradient(135deg, #ff9f43 0%, #ff5252 100%);
@@ -1274,114 +1317,163 @@ input[type="range"]:focus-visible,
 
 /* ── Checkout Section ─────────────────────────────────────────── */
 .checkout-box {
-  background: rgba(0, 0, 0, 0.45);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 16px;
-  padding: 18px 24px;
+  background: rgba(15, 17, 23, 0.85);
+  border: 1px solid rgba(255, 178, 102, 0.25);
+  border-radius: 18px;
+  padding: 16px 20px;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  text-align: center;
-  gap: 12px;
+  gap: 14px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
 }
 
-.checkout-left {
+.checkout-selected-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.csh-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.csh-label {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.checkout-plan-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.checkout-price-pill {
+  font-size: 18px;
+  font-weight: 800;
+  color: #ffb366;
+  background: rgba(255, 159, 67, 0.15);
+  border: 1px solid rgba(255, 159, 67, 0.35);
+  padding: 3px 12px;
+  border-radius: 999px;
+}
+
+/* Payment Method Selection Cards */
+.payment-method-cards {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  text-align: center;
   gap: 10px;
   width: 100%;
 }
 
-.checkout-summary {
+.pay-method-card {
+  width: 100%;
+  text-align: left;
   display: flex;
-  align-items: baseline;
-  justify-content: center;
-  gap: 10px;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+  border-radius: 14px;
+  cursor: pointer;
+  transition: all 180ms cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+  outline: none;
 }
 
-.checkout-plan-name {
+.pay-method-card .pmc-icon {
+  font-size: 24px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.pay-method-card .pmc-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.pay-method-card .pmc-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pay-method-card .pmc-badge {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: #10b981;
+  color: #064e3b;
+}
+
+.pay-method-card .pmc-desc {
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.pay-method-card .pmc-arrow {
   font-size: 16px;
   font-weight: 700;
+  color: rgba(255, 255, 255, 0.4);
+  transition: transform 180ms ease, color 180ms ease;
+}
+
+.pay-method-card:hover .pmc-arrow {
+  transform: translateX(4px);
   color: #ffffff;
 }
 
-.checkout-price {
-  font-size: 20px;
-  font-weight: 800;
+/* Primary Card: Browser Checkout (Recommended) */
+.primary-pay-card {
+  background: linear-gradient(135deg, rgba(255, 159, 67, 0.16) 0%, rgba(255, 82, 82, 0.12) 100%);
+  border: 1.5px solid rgba(255, 178, 102, 0.5);
+  box-shadow: 0 4px 18px rgba(255, 159, 67, 0.18);
+  color: #ffffff;
+}
+
+.primary-pay-card:hover {
+  background: linear-gradient(135deg, rgba(255, 159, 67, 0.25) 0%, rgba(255, 82, 82, 0.2) 100%);
+  border-color: #ff9f43;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(255, 159, 67, 0.32);
+}
+
+.primary-pay-card .pmc-title {
   color: #ffb366;
 }
 
-.checkout-help {
-  margin: 0;
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.7);
-  line-height: 1.4;
-  max-width: 440px;
+/* Secondary Card: In-App Checkout */
+.secondary-pay-card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.9);
 }
 
-.checkout-action-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.razorpay-btn {
-  font-size: 13.5px;
-  font-weight: 700;
-  padding: 12px 24px;
-  min-width: 220px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, #ff9f43 0%, #ff5252 100%);
-  border: 1px solid rgba(255, 178, 102, 0.5);
-  box-shadow: 0 4px 16px rgba(255, 159, 67, 0.35);
-  color: #ffffff;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  transition: transform 150ms ease, box-shadow 150ms ease, filter 150ms ease;
-}
-
-.razorpay-btn:hover {
-  filter: brightness(1.1);
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(255, 159, 67, 0.5);
-}
-
-.razorpay-btn:active {
-  transform: scale(0.98);
-}
-
-.browser-pay-btn {
-  font-size: 13px;
-  font-weight: 600;
-  padding: 11px 18px;
-  border-radius: 10px;
+.secondary-pay-card:hover {
   background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  color: #e2e8f0;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  transition: all 150ms ease;
-  white-space: nowrap;
-}
-
-.browser-pay-btn:hover {
-  background: rgba(255, 255, 255, 0.16);
-  border-color: rgba(255, 255, 255, 0.35);
+  border-color: rgba(255, 255, 255, 0.28);
+  transform: translateY(-1.5px);
   color: #ffffff;
-  transform: translateY(-1px);
 }
 
-.browser-pay-btn:active {
-  transform: scale(0.98);
+.secondary-pay-card .pmc-title {
+  color: #e2e8f0;
 }
 
 /* ── Checkout Active Window Banner ── */
@@ -1771,12 +1863,127 @@ input[type="range"]:focus-visible,
   background: rgba(255, 255, 255, 0.15);
 }
 
-/* ── PAYMENT WAITING OVERLAY ─────────────────────────────────────── */
-#payment-waiting-overlay,
+/* ── FLOATING NON-BLOCKING PAYMENT STATUS PILL ───────────────────── */
+.payment-status-pill {
+  position: fixed;
+  bottom: 26px;
+  left: 50%;
+  transform: translateX(-50%) translateY(0);
+  z-index: 50000;
+  background: linear-gradient(135deg, rgba(20, 24, 33, 0.98), rgba(12, 14, 20, 0.98));
+  border: 1.5px solid rgba(255, 178, 102, 0.45);
+  border-radius: 999px;
+  padding: 10px 18px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  box-shadow:
+    0 12px 36px rgba(0, 0, 0, 0.8),
+    0 0 24px rgba(255, 159, 67, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  pointer-events: auto;
+  opacity: 1;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  max-width: 90vw;
+  animation: slideUpPill 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.payment-status-pill.hidden {
+  display: none !important;
+}
+
+@keyframes slideUpPill {
+  from { opacity: 0; transform: translateX(-50%) translateY(20px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+.psp-pulse {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 0 rgba(16, 185, 129, 0.7);
+  animation: pulseGreen 1.6s infinite;
+  flex-shrink: 0;
+}
+
+@keyframes pulseGreen {
+  0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+  70% { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}
+
+.psp-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.psp-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #ffb366;
+}
+
+.psp-subtitle {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.psp-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 6px;
+}
+
+.psp-btn {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 150ms ease;
+  white-space: nowrap;
+}
+
+.psp-btn.check {
+  background: linear-gradient(135deg, #ff9f43, #ff5252);
+  color: #fff;
+  border: none;
+}
+
+.psp-btn.check:hover {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}
+
+.psp-btn.reopen {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+
+.psp-btn.reopen:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.psp-btn.cancel {
+  background: transparent;
+  border: 1px solid rgba(255, 100, 100, 0.4);
+  color: #ff7777;
+}
+
+.psp-btn.cancel:hover {
+  background: rgba(255, 80, 80, 0.15);
+  color: #ff9999;
+}
+
+/* ── PAYMENT SUCCESS OVERLAY ─────────────────────────────────────── */
 #payment-success-overlay {
   position: fixed;
   inset: 0;
-  z-index: 9900;
+  z-index: 60000;
   background: rgba(0, 0, 0, 0.82);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
@@ -1788,7 +1995,6 @@ input[type="range"]:focus-visible,
   pointer-events: all;
 }
 
-#payment-waiting-overlay.visible,
 #payment-success-overlay.visible {
   opacity: 1;
 }

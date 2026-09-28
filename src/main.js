@@ -258,8 +258,10 @@ function createTray() {
 }
 
 let keepTopInterval = null;
+let isPaymentSessionActive = false;
 
 function ensureTopmost(moveTop = false) {
+  if (isPaymentSessionActive) return;
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.setAlwaysOnTop(true, 'screen-saver', 1);
     if (moveTop) {
@@ -270,9 +272,12 @@ function ensureTopmost(moveTop = false) {
 
 function startKeepTop() {
   if (keepTopInterval) clearInterval(keepTopInterval);
+  if (isPaymentSessionActive) return;
   ensureTopmost(false);
   keepTopInterval = setInterval(() => {
-    ensureTopmost(false);
+    if (!isPaymentSessionActive) {
+      ensureTopmost(false);
+    }
   }, 2000);
 }
 
@@ -319,7 +324,9 @@ function createWindow() {
 
   // Ensure window strictly stays forward (topmost) above all apps, even when another app is focused
   mainWindow.on('blur', () => {
-    ensureTopmost();
+    if (!isPaymentSessionActive) {
+      ensureTopmost();
+    }
   });
 
   // Prevent Windows from minimizing or demoting overlay when another app switches to fullscreen
@@ -427,11 +434,35 @@ ipcMain.handle('open-external', async (event, url) => {
   return false;
 });
 
-// ── IN-APP PAYMENT WINDOW ─────────────────────────────────────────
-// Opens Razorpay payment inside a dedicated foreground window.
-// Temporarily demotes mainWindow's topmost status so the payment window
-// is NEVER hidden behind the setup wizard or buying options.
+// ── IN-APP PAYMENT WINDOW & BROWSER CHECKOUT ──────────────────────
+// Completely isolates payment checkout so mainWindow never obscures
+// or blocks clicks from the Razorpay popup or user's browser.
 let paymentWindow = null;
+
+ipcMain.handle('start-payment-session', () => {
+  isPaymentSessionActive = true;
+  stopKeepTop();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.setAlwaysOnTop(false);
+    mainWindow.setIgnoreMouseEvents(true, { forward: true });
+    mainWindow.webContents.send('payment-session-started');
+  }
+  return true;
+});
+
+ipcMain.handle('end-payment-session', () => {
+  isPaymentSessionActive = false;
+  if (paymentWindow && !paymentWindow.isDestroyed()) {
+    try { paymentWindow.close(); } catch (e) {}
+    paymentWindow = null;
+  }
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.setAlwaysOnTop(true, 'screen-saver', 1);
+    startKeepTop();
+    mainWindow.webContents.send('payment-session-ended');
+  }
+  return true;
+});
 
 ipcMain.handle('open-payment-window', async (event, params) => {
   const { url, planId, hwid } = params || {};
@@ -439,27 +470,28 @@ ipcMain.handle('open-payment-window', async (event, params) => {
 
   // Close any existing payment window
   if (paymentWindow && !paymentWindow.isDestroyed()) {
-    paymentWindow.close();
+    try { paymentWindow.close(); } catch (e) {}
     paymentWindow = null;
   }
 
-  return new Promise((resolve) => {
-    // 1. Temporarily pause keepTop on mainWindow and demote it below payment window
-    stopKeepTop();
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.setAlwaysOnTop(false);
-    }
+  isPaymentSessionActive = true;
+  stopKeepTop();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.setAlwaysOnTop(false);
+    mainWindow.setIgnoreMouseEvents(true, { forward: true });
+  }
 
+  return new Promise((resolve) => {
     const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
-    const winW = Math.min(640, sw - 40);
-    const winH = Math.min(820, sh - 40);
+    const winW = Math.min(620, sw - 40);
+    const winH = Math.min(800, sh - 40);
 
     paymentWindow = new BrowserWindow({
       width: winW,
       height: winH,
       x: Math.round((sw - winW) / 2),
       y: Math.round((sh - winH) / 2),
-      title: 'Edge Light — Secure Payment Checkout',
+      title: 'Edge Light — Secure Razorpay Checkout',
       frame: true,
       transparent: false,
       alwaysOnTop: true,
@@ -489,10 +521,12 @@ ipcMain.handle('open-payment-window', async (event, params) => {
     });
 
     const restoreMainWindow = () => {
+      isPaymentSessionActive = false;
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.setAlwaysOnTop(true, 'screen-saver', 1);
         mainWindow.moveTop();
         startKeepTop();
+        mainWindow.webContents.send('payment-session-ended');
       }
     };
 
@@ -565,7 +599,7 @@ ipcMain.handle('focus-payment-window', () => {
 
 ipcMain.handle('close-payment-window', () => {
   if (paymentWindow && !paymentWindow.isDestroyed()) {
-    paymentWindow.close();
+    try { paymentWindow.close(); } catch (e) {}
     paymentWindow = null;
     return true;
   }
@@ -574,8 +608,15 @@ ipcMain.handle('close-payment-window', () => {
 
 ipcMain.handle('open-payment-in-browser', async (event, url) => {
   if (paymentWindow && !paymentWindow.isDestroyed()) {
-    paymentWindow.close();
+    try { paymentWindow.close(); } catch (e) {}
     paymentWindow = null;
+  }
+  isPaymentSessionActive = true;
+  stopKeepTop();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.setAlwaysOnTop(false);
+    mainWindow.setIgnoreMouseEvents(true, { forward: true });
+    mainWindow.webContents.send('payment-session-started', { url, mode: 'browser' });
   }
   if (typeof url === 'string' && (url.startsWith('https://') || url.startsWith('http://'))) {
     await shell.openExternal(url);
@@ -632,7 +673,7 @@ ipcMain.handle('create-razorpay-link', async (event, params) => {
           'Authorization': `Basic ${auth}`,
           'Content-Length': Buffer.byteLength(postData)
         },
-        timeout: 4000
+        timeout: 2000
       }, (res) => {
         let body = '';
         res.on('data', chunk => body += chunk);

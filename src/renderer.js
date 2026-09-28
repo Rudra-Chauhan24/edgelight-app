@@ -820,6 +820,7 @@
   let idleTimer = null;
   let isInteractingWithDock = false;
   let clickThroughState = true;
+  let isPaymentSessionOpen = false;
 
   function isAnyModalOpen() {
     const licModal = licenseModal || document.getElementById('license-modal');
@@ -831,7 +832,7 @@
   }
 
   function setClickThrough(enableClickThrough) {
-    if (enableClickThrough && isAnyModalOpen()) {
+    if (enableClickThrough && isAnyModalOpen() && !isPaymentSessionOpen) {
       enableClickThrough = false;
     }
     if (clickThroughState === enableClickThrough) return;
@@ -1770,12 +1771,12 @@
   let currentWizardStep = 1;
   let currentSelectedPlanId = 'quarterly';
   let paymentConfig = {
-    keyId: 'rzp_live_PLACEHOLDER',
+    keyId: 'rzp_live_TbF2T3PxIu4EAn',
     upiId: 'edgelight@upi',
     plans: {
-      monthly: { id: 'monthly', name: 'Monthly Pass', price: 29, link: 'https://rzp.io/l/edgelight-monthly' },
-      quarterly: { id: 'quarterly', name: '3-Month Pass', price: 49, link: 'https://rzp.io/l/edgelight-quarterly' },
-      lifetime: { id: 'lifetime', name: 'Lifetime Pro', price: 99, link: 'https://rzp.io/l/edgelight-lifetime' }
+      monthly: { id: 'monthly', name: 'Monthly Pass', price: 29, link: 'https://rzp.io/rzp/WY3lkA6' },
+      quarterly: { id: 'quarterly', name: '3-Month Pass', price: 49, link: 'https://rzp.io/rzp/01mOm4K' },
+      lifetime: { id: 'lifetime', name: 'Lifetime Pro', price: 99, link: 'https://rzp.io/rzp/K30Pa9v' }
     }
   };
 
@@ -1827,12 +1828,24 @@
       const isSelected = card.dataset.planId === planId;
       card.classList.toggle('selected', isSelected);
       const tag = card.querySelector('.plan-select-tag');
-      if (tag) tag.textContent = isSelected ? 'Selected ✓' : 'Select';
+      if (tag) tag.textContent = isSelected ? 'Selected ✓' : `Select ₹${card.dataset.planId === 'monthly' ? 29 : card.dataset.planId === 'lifetime' ? 99 : 49}`;
     });
 
     if (selectedPlanTitle) selectedPlanTitle.textContent = plan.name;
     if (selectedPlanPrice) selectedPlanPrice.textContent = `₹${plan.price}`;
     if (rzpBtnPrice) rzpBtnPrice.textContent = `₹${plan.price}`;
+
+    document.querySelectorAll('.pay-amount-display').forEach(el => {
+      el.textContent = `₹${plan.price}`;
+    });
+    const licenseQuickPrice = document.getElementById('licenseQuickPrice');
+    if (licenseQuickPrice) licenseQuickPrice.textContent = `₹${plan.price}`;
+    const pspPlanPrice = document.getElementById('pspPlanPrice');
+    if (pspPlanPrice) pspPlanPrice.textContent = `₹${plan.price}`;
+
+    document.querySelectorAll('.lpq-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.plan === planId);
+    });
 
     // Generate standard UPI Intent URL and render QR code
     const upiId = paymentConfig.upiId || 'edgelight@upi';
@@ -1896,6 +1909,11 @@
   const cabBringFrontBtn = document.getElementById('cabBringFrontBtn');
   const cabOpenBrowserBtn = document.getElementById('cabOpenBrowserBtn');
   const cabCancelBtn = document.getElementById('cabCancelBtn');
+  const paymentStatusPill = document.getElementById('payment-status-pill');
+  const pspCheckBtn = document.getElementById('pspCheckBtn');
+  const pspReopenBtn = document.getElementById('pspReopenBtn');
+  const pspCancelBtn = document.getElementById('pspCancelBtn');
+  const licenseQuickPayBtn = document.getElementById('licenseQuickPayBtn');
   let activePaymentUrl = null;
 
   async function resolvePaymentUrl() {
@@ -1922,49 +1940,128 @@
     return { url, plan, hwid };
   }
 
-  razorpayDirectBtn?.addEventListener('click', async () => {
+  async function startPaymentSession(mode = 'browser') {
     const { url, plan, hwid } = await resolvePaymentUrl();
     activePaymentUrl = url;
+    isPaymentSessionOpen = true;
 
-    // ── OPEN IN-APP PAYMENT WINDOW (GUARANTEED TOPMOST & FOCUSED) ──
-    showStatus(`⚡ Opening secure payment window (₹${plan.price || 49})…`, 3000);
-    razorpayDirectBtn.disabled = true;
-    razorpayDirectBtn.textContent = '⏳ Payment window open…';
-    if (checkoutActiveBanner) checkoutActiveBanner.classList.remove('hidden');
+    // 1. Hide full screen modal overlays so user's screen is completely unobstructed
+    wizardModal?.classList.remove('visible');
+    licenseModal?.classList.remove('visible');
 
-    try {
+    // 2. Enable mouse click-through on mainWindow so user can click their browser/desktop freely
+    setClickThrough(true);
+
+    // 3. Inform main process to demote mainWindow and pause keepTop timer
+    if (window.edgeLightAPI?.startPaymentSession) {
+      await window.edgeLightAPI.startPaymentSession();
+    }
+
+    // 4. Update and display the sleek floating status pill at bottom
+    const pspPlanPrice = document.getElementById('pspPlanPrice');
+    if (pspPlanPrice) pspPlanPrice.textContent = `₹${plan.price || 49}`;
+    if (paymentStatusPill) {
+      paymentStatusPill.classList.remove('hidden');
+    }
+
+    // 5. Open checkout in requested mode
+    if (mode === 'browser') {
+      showStatus(`🌐 Opening checkout in your browser tab (₹${plan.price || 49})…`, 3500);
+      if (window.edgeLightAPI?.openPaymentInBrowser) {
+        await window.edgeLightAPI.openPaymentInBrowser(url);
+      } else if (window.edgeLightAPI?.openExternal) {
+        await window.edgeLightAPI.openExternal(url);
+      } else {
+        window.open(url, '_blank');
+      }
+    } else {
+      showStatus(`⚡ Opening secure payment popup (₹${plan.price || 49})…`, 3000);
       if (window.edgeLightAPI?.openPaymentWindow) {
-        const result = await window.edgeLightAPI.openPaymentWindow({
+        window.edgeLightAPI.openPaymentWindow({
           url,
           planId: currentSelectedPlanId,
           hwid
-        });
-        if (result && result.success) {
-          startPaymentActivationPolling(currentSelectedPlanId);
-        }
+        }).then((result) => {
+          if (result && result.success) {
+            startPaymentActivationPolling(currentSelectedPlanId);
+          }
+        }).catch(() => {});
+      } else if (window.edgeLightAPI?.openExternal) {
+        await window.edgeLightAPI.openExternal(url);
       } else {
-        // Fallback: external browser if API not available
-        if (window.edgeLightAPI?.openExternal) {
-          await window.edgeLightAPI.openExternal(url);
-        } else {
-          window.open(url, '_blank');
-        }
-        startPaymentActivationPolling(currentSelectedPlanId);
+        window.open(url, '_blank');
       }
+    }
+
+    // 6. Start polling for activation
+    startPaymentActivationPolling(currentSelectedPlanId);
+  }
+
+  async function endPaymentSession(restoreUI = false, step = 3) {
+    isPaymentSessionOpen = false;
+    stopPaymentActivationPolling();
+    if (paymentStatusPill) {
+      paymentStatusPill.classList.add('hidden');
+    }
+    if (window.edgeLightAPI?.endPaymentSession) {
+      await window.edgeLightAPI.endPaymentSession();
+    }
+    if (restoreUI) {
+      showSetupWizard(step);
+    }
+  }
+
+  // Hook up Step 3 checkout buttons
+  openBrowserTabBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    startPaymentSession('browser');
+  });
+
+  razorpayDirectBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    startPaymentSession('window');
+  });
+
+  // Quick pay button in License modal
+  licenseQuickPayBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    startPaymentSession('browser');
+  });
+
+  // Quick plan select pills inside License modal
+  document.querySelectorAll('.lpq-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const plan = btn.dataset.plan;
+      if (plan) updateSelectedPlanUI(plan);
+    });
+  });
+
+  // Floating status pill buttons
+  pspCheckBtn?.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    pspCheckBtn.textContent = '⏳ Checking…';
+    try {
+      if (window.edgeLightAPI?.refreshLicenseInfo) {
+        const updated = await window.edgeLightAPI.refreshLicenseInfo();
+        if (updated && updated.isAuthorized && updated.status === 'approved') {
+          await endPaymentSession(false);
+          updateLicenseUI(updated);
+          showPaymentSuccessUI(updated);
+          return;
+        }
+      }
+      showStatus('Payment not yet detected. Polling is still active…', 3000);
     } catch (err) {
-      console.warn('[Payment] Window error:', err);
-      showStatus('Payment window error. Retrying…', 2000);
+      showStatus('Error checking license status.', 2000);
     } finally {
-      razorpayDirectBtn.disabled = false;
-      razorpayDirectBtn.innerHTML = `<span class="rzp-icon">⚡</span> Pay <span id="rzpBtnPrice">₹${plan.price || 49}</span> with Razorpay`;
-      if (checkoutActiveBanner) checkoutActiveBanner.classList.add('hidden');
+      pspCheckBtn.textContent = '🔄 Check Status';
     }
   });
 
-  // Open payment link directly in default browser tab (Chrome/Edge/Firefox)
-  openBrowserTabBtn?.addEventListener('click', async () => {
-    const { url, plan } = await resolvePaymentUrl();
-    showStatus(`🌐 Opening checkout in your browser tab (₹${plan.price || 49})…`, 3500);
+  pspReopenBtn?.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const url = activePaymentUrl || (await resolvePaymentUrl()).url;
     if (window.edgeLightAPI?.openPaymentInBrowser) {
       await window.edgeLightAPI.openPaymentInBrowser(url);
     } else if (window.edgeLightAPI?.openExternal) {
@@ -1972,10 +2069,15 @@
     } else {
       window.open(url, '_blank');
     }
-    startPaymentActivationPolling(currentSelectedPlanId);
+    showStatus('🌐 Re-opened checkout link.', 2500);
   });
 
-  // Active banner action controls
+  pspCancelBtn?.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    await endPaymentSession(true, 3);
+  });
+
+  // In-card banner buttons if ever shown
   cabBringFrontBtn?.addEventListener('click', async () => {
     if (window.edgeLightAPI?.focusPaymentWindow) {
       await window.edgeLightAPI.focusPaymentWindow();
@@ -1989,8 +2091,6 @@
     } else if (window.edgeLightAPI?.openExternal) {
       await window.edgeLightAPI.openExternal(url);
     }
-    if (checkoutActiveBanner) checkoutActiveBanner.classList.add('hidden');
-    startPaymentActivationPolling(currentSelectedPlanId);
   });
 
   cabCancelBtn?.addEventListener('click', async () => {
@@ -1998,30 +2098,22 @@
       await window.edgeLightAPI.closePaymentWindow();
     }
     if (checkoutActiveBanner) checkoutActiveBanner.classList.add('hidden');
-    razorpayDirectBtn.disabled = false;
-    const plansSource = paymentConfig.plansById || paymentConfig.plans;
-    const plan = plansSource?.[currentSelectedPlanId] || plansSource?.quarterly || {};
-    razorpayDirectBtn.innerHTML = `<span class="rzp-icon">⚡</span> Pay <span id="rzpBtnPrice">₹${plan.price || 49}</span> with Razorpay`;
   });
 
   // ── POST-PAYMENT LICENSE ACTIVATION POLLING ────────────────────────
-  // After user pays, poll Firestore every 4s up to 10 minutes waiting
-  // for the admin/webhook to set status='approved' in Firestore.
   let paymentPollInterval = null;
   let paymentPollTimeout = null;
 
   function startPaymentActivationPolling(planId) {
     stopPaymentActivationPolling();
-    showPaymentWaitingUI(planId);
 
     let pollCount = 0;
-    const MAX_POLLS = 150; // 150 × 4s = 10 minutes
+    const MAX_POLLS = 180; // 180 × 3.5s = ~10.5 minutes
 
     paymentPollInterval = setInterval(async () => {
       pollCount++;
       if (pollCount > MAX_POLLS) {
         stopPaymentActivationPolling();
-        hidePaymentWaitingUI();
         showStatus('⏳ Payment not yet confirmed. Check back later or contact support.', 5000);
         return;
       }
@@ -2030,51 +2122,18 @@
         if (window.edgeLightAPI?.refreshLicenseInfo) {
           const updated = await window.edgeLightAPI.refreshLicenseInfo();
           if (updated && updated.isAuthorized && updated.status === 'approved') {
-            stopPaymentActivationPolling();
-            hidePaymentWaitingUI();
+            await endPaymentSession(false);
             updateLicenseUI(updated);
             showPaymentSuccessUI(updated);
           }
         }
       } catch (e) {}
-    }, 4000);
+    }, 3500);
   }
 
   function stopPaymentActivationPolling() {
     if (paymentPollInterval) { clearInterval(paymentPollInterval); paymentPollInterval = null; }
     if (paymentPollTimeout) { clearTimeout(paymentPollTimeout); paymentPollTimeout = null; }
-  }
-
-  // ── PAYMENT WAITING UI ─────────────────────────────────────────────
-  let paymentWaitingOverlay = null;
-
-  function showPaymentWaitingUI(planId) {
-    if (paymentWaitingOverlay) return;
-    paymentWaitingOverlay = document.createElement('div');
-    paymentWaitingOverlay.id = 'payment-waiting-overlay';
-    paymentWaitingOverlay.innerHTML = `
-      <div class="pwait-card">
-        <div class="pwait-spinner"></div>
-        <h3 class="pwait-title">Waiting for Payment Confirmation</h3>
-        <p class="pwait-msg">Once your payment is processed, your license will activate automatically.<br>
-        <strong>Do not close this window.</strong></p>
-        <div class="pwait-dots"><span></span><span></span><span></span></div>
-        <button class="pwait-cancel-btn" id="payWaitCancelBtn">Cancel / Close</button>
-      </div>
-    `;
-    document.body.appendChild(paymentWaitingOverlay);
-    setTimeout(() => paymentWaitingOverlay?.classList.add('visible'), 10);
-    document.getElementById('payWaitCancelBtn')?.addEventListener('click', () => {
-      stopPaymentActivationPolling();
-      hidePaymentWaitingUI();
-    });
-  }
-
-  function hidePaymentWaitingUI() {
-    if (paymentWaitingOverlay) {
-      paymentWaitingOverlay.classList.remove('visible');
-      setTimeout(() => { paymentWaitingOverlay?.remove(); paymentWaitingOverlay = null; }, 400);
-    }
   }
 
   // ── PAYMENT SUCCESS UI ─────────────────────────────────────────────
@@ -2115,6 +2174,14 @@
       if (checkoutActiveBanner) checkoutActiveBanner.classList.add('hidden');
       if (result && result.success) {
         startPaymentActivationPolling(result.planId);
+      }
+    });
+  }
+
+  if (window.edgeLightAPI?.onPaymentSessionEnded) {
+    window.edgeLightAPI.onPaymentSessionEnded(() => {
+      if (!isAnyModalOpen() && !isPaymentSessionOpen) {
+        setClickThrough(true);
       }
     });
   }
