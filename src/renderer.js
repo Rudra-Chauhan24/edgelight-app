@@ -1847,12 +1847,23 @@
       btn.classList.toggle('active', btn.dataset.plan === planId);
     });
 
-    // Generate standard UPI Intent URL and render QR code
+    // Generate standard UPI Intent URL and render QR code for exact amount
     const upiId = paymentConfig.upiId || 'edgelight@upi';
     const hwid = licenseState.hwid || 'TRIAL';
     const upiPayload = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=EdgeLight&am=${plan.price}&cu=INR&tn=EdgeLight-${plan.id}-${hwid}`;
+    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(upiPayload)}`;
     if (upiQrImg) {
-      upiQrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(upiPayload)}`;
+      upiQrImg.src = qrUrl;
+    }
+    const licenseModalQrImg = document.getElementById('licenseModalQrImg');
+    if (licenseModalQrImg) {
+      licenseModalQrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(upiPayload)}`;
+    }
+
+    const directPayLinkText = document.getElementById('directPayLinkText');
+    if (directPayLinkText && plan.link) {
+      directPayLinkText.textContent = plan.link;
+      directPayLinkText.href = plan.link;
     }
   }
 
@@ -1930,8 +1941,10 @@
           planId: currentSelectedPlanId || 'quarterly',
           hwid: hwid
         });
-        if (dynamicUrl && dynamicUrl.startsWith('http')) {
+        if (dynamicUrl && typeof dynamicUrl === 'string' && dynamicUrl.startsWith('http')) {
           url = dynamicUrl;
+        } else if (dynamicUrl && dynamicUrl.url && typeof dynamicUrl.url === 'string') {
+          url = dynamicUrl.url;
         }
       } catch (err) {
         console.warn('[Razorpay] Dynamic checkout link fallback:', err);
@@ -1945,28 +1958,22 @@
     activePaymentUrl = url;
     isPaymentSessionOpen = true;
 
-    // 1. Hide full screen modal overlays so user's screen is completely unobstructed
-    wizardModal?.classList.remove('visible');
-    licenseModal?.classList.remove('visible');
+    // Keep modals visible and interactive so user never loses their checkout context!
+    setClickThrough(false);
 
-    // 2. Enable mouse click-through on mainWindow so user can click their browser/desktop freely
-    setClickThrough(true);
+    const pollingStatusText = document.getElementById('pollingStatusText');
+    if (pollingStatusText) {
+      pollingStatusText.textContent = `⏳ Checkout opened for ₹${plan.price || 49}. Waiting for payment... (checks every 3s)`;
+    }
 
-    // 3. Inform main process to demote mainWindow and pause keepTop timer
+    // Inform main process to demote alwaysOnTop so user can view their browser if opened
     if (window.edgeLightAPI?.startPaymentSession) {
       await window.edgeLightAPI.startPaymentSession();
     }
 
-    // 4. Update and display the sleek floating status pill at bottom
-    const pspPlanPrice = document.getElementById('pspPlanPrice');
-    if (pspPlanPrice) pspPlanPrice.textContent = `₹${plan.price || 49}`;
-    if (paymentStatusPill) {
-      paymentStatusPill.classList.remove('hidden');
-    }
-
-    // 5. Open checkout in requested mode
+    // Open checkout in requested mode
     if (mode === 'browser') {
-      showStatus(`🌐 Opening checkout in your browser tab (₹${plan.price || 49})…`, 3500);
+      showStatus(`🌐 Opening checkout in your browser (₹${plan.price || 49})…`, 3500);
       if (window.edgeLightAPI?.openPaymentInBrowser) {
         await window.edgeLightAPI.openPaymentInBrowser(url);
       } else if (window.edgeLightAPI?.openExternal) {
@@ -1975,7 +1982,8 @@
         window.open(url, '_blank');
       }
     } else {
-      showStatus(`⚡ Opening secure payment popup (₹${plan.price || 49})…`, 3000);
+      showStatus(`⚡ Opening secure payment window (₹${plan.price || 49})…`, 3000);
+      if (checkoutActiveBanner) checkoutActiveBanner.classList.remove('hidden');
       if (window.edgeLightAPI?.openPaymentWindow) {
         window.edgeLightAPI.openPaymentWindow({
           url,
@@ -1993,7 +2001,7 @@
       }
     }
 
-    // 6. Start polling for activation
+    // Start polling for activation
     startPaymentActivationPolling(currentSelectedPlanId);
   }
 
@@ -2002,6 +2010,9 @@
     stopPaymentActivationPolling();
     if (paymentStatusPill) {
       paymentStatusPill.classList.add('hidden');
+    }
+    if (checkoutActiveBanner) {
+      checkoutActiveBanner.classList.add('hidden');
     }
     if (window.edgeLightAPI?.endPaymentSession) {
       await window.edgeLightAPI.endPaymentSession();
@@ -2035,6 +2046,92 @@
       const plan = btn.dataset.plan;
       if (plan) updateSelectedPlanUI(plan);
     });
+  });
+
+  // Copy UPI ID button
+  const copyUpiIdBtn = document.getElementById('copyUpiIdBtn');
+  copyUpiIdBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const upiId = paymentConfig.upiId || 'edgelight@upi';
+    navigator.clipboard?.writeText(upiId);
+    copyUpiIdBtn.textContent = '✓ Copied!';
+    setTimeout(() => { copyUpiIdBtn.textContent = '📋 Copy'; }, 2000);
+  });
+
+  // Copy Direct Pay Link button
+  const copyPayLinkBtn = document.getElementById('copyPayLinkBtn');
+  copyPayLinkBtn?.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const { url } = await resolvePaymentUrl();
+    navigator.clipboard?.writeText(url);
+    copyPayLinkBtn.textContent = '✓';
+    setTimeout(() => { copyPayLinkBtn.textContent = '📋'; }, 2000);
+  });
+
+  // Manual payment verification helper
+  async function handleManualActivation(inputEl, feedbackEl, planId) {
+    const val = inputEl?.value?.trim();
+    if (!val || val.length < 4) {
+      if (feedbackEl) {
+        feedbackEl.className = 'mac-feedback error';
+        feedbackEl.textContent = 'Please enter a valid Razorpay Payment ID or 12-digit UPI Ref (UTR).';
+        feedbackEl.classList.remove('hidden');
+      }
+      return;
+    }
+
+    if (feedbackEl) {
+      feedbackEl.className = 'mac-feedback';
+      feedbackEl.textContent = '⏳ Verifying & activating license…';
+      feedbackEl.classList.remove('hidden');
+    }
+
+    try {
+      if (window.edgeLightAPI?.activatePaymentRef) {
+        const res = await window.edgeLightAPI.activatePaymentRef({
+          paymentRef: val,
+          planId: planId || currentSelectedPlanId || 'quarterly'
+        });
+        if (res && res.success) {
+          if (feedbackEl) {
+            feedbackEl.className = 'mac-feedback success';
+            feedbackEl.textContent = '✓ Payment verified! Pro license activated 🎉';
+          }
+          if (window.edgeLightAPI?.refreshLicenseInfo) {
+            const updated = await window.edgeLightAPI.refreshLicenseInfo();
+            updateLicenseUI(updated);
+            showPaymentSuccessUI(updated);
+          }
+          return;
+        } else {
+          if (feedbackEl) {
+            feedbackEl.className = 'mac-feedback error';
+            feedbackEl.textContent = res?.error || 'Payment verification failed. Please check your reference.';
+          }
+        }
+      }
+    } catch (e) {
+      if (feedbackEl) {
+        feedbackEl.className = 'mac-feedback error';
+        feedbackEl.textContent = 'Verification error: ' + e.message;
+      }
+    }
+  }
+
+  const manualActivateBtn = document.getElementById('manualActivateBtn');
+  const manualPaymentRefInput = document.getElementById('manualPaymentRefInput');
+  const manualFeedback = document.getElementById('manualFeedback');
+  manualActivateBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    handleManualActivation(manualPaymentRefInput, manualFeedback, currentSelectedPlanId);
+  });
+
+  const licenseManualBtn = document.getElementById('licenseManualBtn');
+  const licenseManualInput = document.getElementById('licenseManualInput');
+  const licenseManualFeedback = document.getElementById('licenseManualFeedback');
+  licenseManualBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    handleManualActivation(licenseManualInput, licenseManualFeedback, currentSelectedPlanId);
   });
 
   // Floating status pill buttons

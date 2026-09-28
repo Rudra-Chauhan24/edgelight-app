@@ -790,6 +790,58 @@ class LicenseManager {
       collection: this.config.FIRESTORE_COLLECTION
     };
   }
+
+  async activateWithPaymentRef(paymentRef, planId = 'quarterly') {
+    const cleanRef = String(paymentRef || '').trim();
+    if (!cleanRef || cleanRef.length < 4) {
+      return { success: false, error: 'Please enter a valid Payment ID or UPI Ref (UTR).' };
+    }
+
+    const plans = {
+      monthly: { planId: 'monthly', planName: 'Monthly Pass', durationDays: 30 },
+      quarterly: { planId: 'quarterly', planName: '3-Month Pass', durationDays: 90 },
+      lifetime: { planId: 'lifetime', planName: 'Lifetime Pro', durationDays: null }
+    };
+    const selected = plans[planId] || plans.quarterly;
+    const now = Date.now();
+    const expiresAt = selected.durationDays ? new Date(now + selected.durationDays * 86400000).toISOString() : null;
+    const key = `EL-${selected.planId.toUpperCase()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+
+    const updateFields = {
+      status: 'approved',
+      planId: selected.planId,
+      planName: selected.planName,
+      licenseKey: key,
+      expiresAt: expiresAt,
+      paymentId: cleanRef,
+      paidAt: new Date(now).toISOString(),
+      approvedAt: new Date(now).toISOString(),
+      lastUpdated: new Date(now).toISOString()
+    };
+
+    // Update local vault immediately
+    const data = this.vault.read() || {};
+    data.status = 'approved';
+    data.planId = selected.planId;
+    data.planName = selected.planName;
+    data.licenseKey = key;
+    data.expiresAt = expiresAt;
+    data.paymentId = cleanRef;
+    data.clockTampered = false;
+    this.vault.write(data);
+
+    // Sync to Firestore cloud
+    if (this.firestore.isConfigured()) {
+      try {
+        await this.firestore.upsertDocument(this.hwidInfo.shortHwid, updateFields);
+      } catch (err) {
+        console.warn('[LicenseManager] Cloud sync for manual payment activation:', err.message);
+      }
+    }
+
+    const evaluated = this._evaluate(data);
+    return { success: true, status: 'approved', licenseInfo: evaluated };
+  }
 }
 
 module.exports = {

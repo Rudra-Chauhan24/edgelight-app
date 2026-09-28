@@ -107,6 +107,25 @@
         <button id="licenseQuickPayBtn" class="primary-btn pulse-glow" type="button">
           ⚡ Pay <span id="licenseQuickPrice">₹49</span> with Razorpay
         </button>
+
+        <!-- UPI QR Code inside License Modal -->
+        <div class="license-upi-quick">
+          <div class="luq-label">Or Scan UPI QR (PhonePe / GPay / Paytm):</div>
+          <div class="luq-qr-wrap">
+            <img id="licenseModalQrImg" class="license-modal-qr" src="https://api.qrserver.com/v1/create-qr-code/?size=140x140&amp;data=upi%3A%2F%2Fpay%3Fpa%3Dedgelight%40upi%26pn%3DEdgeLight%26am%3D49%26cu%3DINR" alt="UPI QR" />
+          </div>
+        </div>
+
+        <!-- Manual Payment ID / UTR Input in License Modal -->
+        <div class="license-manual-wrap">
+          <div class="lmw-label">Already Paid? Enter Payment ID / UTR:</div>
+          <div class="lmw-row">
+            <input type="text" id="licenseManualInput" class="license-manual-input" placeholder="pay_XXXXX or 12-digit UPI UTR" />
+            <button type="button" id="licenseManualBtn" class="license-manual-btn">Activate</button>
+          </div>
+          <div id="licenseManualFeedback" class="license-manual-feedback hidden"></div>
+        </div>
+
         <button id="openPlansFromLicenseBtn" class="secondary-btn" type="button">
           ⚙️ Open Full Setup Wizard
         </button>
@@ -259,8 +278,8 @@
             </div>
           </div>
 
-          <!-- Redesigned Payment Action Box -->
-          <div class="checkout-box">
+          <!-- ALL-IN-ONE VISIBLE PAYMENT TERMINAL -->
+          <div class="checkout-box payment-terminal-box">
             <div class="checkout-selected-header">
               <div class="csh-left">
                 <span class="csh-label">Selected Plan:</span>
@@ -271,44 +290,82 @@
               </div>
             </div>
 
-            <div class="payment-method-cards">
-              <!-- Method 1: Web Browser Checkout (Primary / Recommended) -->
-              <button type="button" class="pay-method-card primary-pay-card" id="openBrowserTabBtn">
-                <div class="pmc-icon">⚡</div>
-                <div class="pmc-body">
-                  <div class="pmc-title">
-                    Pay <span class="pay-amount-display" id="rzpBtnPrice">₹49</span> with Razorpay (Browser)
-                    <span class="pmc-badge">RECOMMENDED</span>
-                  </div>
-                  <div class="pmc-desc">
-                    Opens in Chrome/Edge. Supports <strong>Google Pay, PhonePe, Paytm UPI, QR Scan, Cards &amp; NetBanking</strong>.
-                  </div>
+            <!-- Dual Payment Terminal Grid: QR Code & Razorpay Actions -->
+            <div class="payment-terminal-grid">
+              <!-- Left Column: UPI QR Code -->
+              <div class="terminal-col upi-qr-col">
+                <div class="col-heading">
+                  <span class="heading-icon">📱</span>
+                  <span>Scan with any UPI App</span>
                 </div>
-                <div class="pmc-arrow">→</div>
-              </button>
+                <div class="upi-qr-card">
+                  <img id="upiQrImg" class="upi-qr-img" src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&amp;data=upi%3A%2F%2Fpay%3Fpa%3Dedgelight%40upi%26pn%3DEdgeLight%26am%3D49%26cu%3DINR" alt="UPI QR Code" />
+                  <div class="upi-badge-text">Google Pay • PhonePe • Paytm • CRED</div>
+                </div>
+                <div class="upi-details-row">
+                  <span class="upi-id-label">UPI ID:</span>
+                  <code class="upi-id-code" id="upiIdDisplay">edgelight@upi</code>
+                  <button type="button" class="mini-copy-btn" id="copyUpiIdBtn" title="Copy UPI ID">📋 Copy</button>
+                </div>
+              </div>
 
-              <!-- Method 2: In-App Dedicated Window -->
-              <button type="button" class="pay-method-card secondary-pay-card" id="razorpayDirectBtn">
-                <div class="pmc-icon">💳</div>
-                <div class="pmc-body">
-                  <div class="pmc-title">
-                    Pay in Dedicated App Window
-                  </div>
-                  <div class="pmc-desc">
-                    Opens a centered Razorpay checkout popup directly inside Edge Light.
-                  </div>
+              <!-- Right Column: Online Checkout (Razorpay) -->
+              <div class="terminal-col rzp-actions-col">
+                <div class="col-heading">
+                  <span class="heading-icon">⚡</span>
+                  <span>Razorpay Instant Checkout</span>
                 </div>
-                <div class="pmc-arrow">→</div>
-              </button>
+
+                <!-- Primary Razorpay Button -->
+                <button type="button" class="rzp-primary-btn pulse-glow" id="openBrowserTabBtn">
+                  <span class="rpb-icon">⚡</span>
+                  <div class="rpb-text">
+                    <div class="rpb-title">Pay <span id="rzpBtnPrice">₹49</span> with Razorpay</div>
+                    <div class="rpb-desc">UPI, Cards, NetBanking (50+ Banks), Wallets</div>
+                  </div>
+                  <span class="rpb-arrow">→</span>
+                </button>
+
+                <!-- Secondary Window Option -->
+                <button type="button" class="rzp-secondary-btn" id="razorpayDirectBtn">
+                  <span>💳 Open in Dedicated Window</span>
+                </button>
+
+                <!-- Direct Checkout Link -->
+                <div class="direct-link-box">
+                  <span class="dl-label">Direct Link:</span>
+                  <a href="https://rzp.io/rzp/01mOm4K" target="_blank" class="dl-link" id="directPayLinkText">https://rzp.io/rzp/01mOm4K</a>
+                  <button type="button" class="mini-copy-btn" id="copyPayLinkBtn" title="Copy Link">📋</button>
+                </div>
+
+                <!-- Live Auto-Verification Polling Status -->
+                <div class="live-polling-badge" id="livePollingBadge">
+                  <div class="radar-dot"></div>
+                  <span id="pollingStatusText">Auto-activating when payment completes (live 3s check)</span>
+                </div>
+              </div>
             </div>
 
-            <!-- Active Payment Window Controller Card -->
+            <!-- Manual Instant Unlock Card (If User Paid via UPI or Link) -->
+            <div class="manual-activate-card">
+              <div class="mac-header">
+                <span class="mac-icon">🔑</span>
+                <strong>Already Paid or Scanned QR? Enter Payment ID to Activate Instantly:</strong>
+              </div>
+              <div class="mac-input-row">
+                <input type="text" id="manualPaymentRefInput" class="mac-input" placeholder="Enter Razorpay Payment ID (e.g. pay_...) or 12-digit UPI Ref/UTR" />
+                <button type="button" id="manualActivateBtn" class="mac-btn">⚡ Activate License</button>
+              </div>
+              <div id="manualFeedback" class="mac-feedback hidden"></div>
+            </div>
+
+            <!-- Active Payment Window Controller Banner (Visible when popup is open) -->
             <div id="checkoutActiveBanner" class="checkout-active-banner hidden">
               <div class="cab-header">
                 <div class="cab-spinner"></div>
                 <div class="cab-text">
                   <strong>Checkout Window is Open</strong>
-                  <span>Finish payment in the popup window or switch to your browser tab.</span>
+                  <span>Finish payment in the popup window or browser tab. Auto-activates in seconds.</span>
                 </div>
               </div>
               <div class="cab-buttons">
@@ -365,7 +422,7 @@
   <div id="ota-banner" class="ota-banner">
     <div class="ota-content">
       <span class="ota-sparkle">✨</span>
-      <div class="ota-text">Update available: <strong id="ota-version">v1.0.7</strong></div>
+      <div class="ota-text">Update available: <strong id="ota-version">v1.0.8</strong></div>
       <div class="ota-progress-box hidden" id="ota-progress-box">
         <div class="ota-progress-fill" id="ota-progress-fill"></div>
         <span class="ota-progress-text" id="ota-progress-text">0%</span>

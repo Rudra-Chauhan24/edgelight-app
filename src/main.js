@@ -444,7 +444,6 @@ ipcMain.handle('start-payment-session', () => {
   stopKeepTop();
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.setAlwaysOnTop(false);
-    mainWindow.setIgnoreMouseEvents(true, { forward: true });
     mainWindow.webContents.send('payment-session-started');
   }
   return true;
@@ -492,6 +491,8 @@ ipcMain.handle('open-payment-window', async (event, params) => {
       x: Math.round((sw - winW) / 2),
       y: Math.round((sh - winH) / 2),
       title: 'Edge Light — Secure Razorpay Checkout',
+      parent: (mainWindow && !mainWindow.isDestroyed()) ? mainWindow : undefined,
+      modal: false,
       frame: true,
       transparent: false,
       alwaysOnTop: true,
@@ -499,6 +500,7 @@ ipcMain.handle('open-payment-window', async (event, params) => {
       minimizable: true,
       maximizable: true,
       show: true,
+      skipTaskbar: false,
       backgroundColor: '#111827',
       webPreferences: {
         nodeIntegration: false,
@@ -508,7 +510,7 @@ ipcMain.handle('open-payment-window', async (event, params) => {
     });
 
     paymentWindow.setMenuBarVisibility(false);
-    paymentWindow.setAlwaysOnTop(true, 'screen-saver', 9999);
+    paymentWindow.setAlwaysOnTop(true, 'screen-saver', 99999);
     paymentWindow.moveTop();
     paymentWindow.focus();
 
@@ -615,7 +617,6 @@ ipcMain.handle('open-payment-in-browser', async (event, url) => {
   stopKeepTop();
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.setAlwaysOnTop(false);
-    mainWindow.setIgnoreMouseEvents(true, { forward: true });
     mainWindow.webContents.send('payment-session-started', { url, mode: 'browser' });
   }
   if (typeof url === 'string' && (url.startsWith('https://') || url.startsWith('http://'))) {
@@ -623,6 +624,19 @@ ipcMain.handle('open-payment-in-browser', async (event, url) => {
     return true;
   }
   return false;
+});
+
+ipcMain.handle('activate-payment-ref', async (event, params) => {
+  try {
+    const { paymentRef, planId } = params || {};
+    const res = await licenseManager.activateWithPaymentRef(paymentRef, planId);
+    if (res && res.success && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('license-status-updated', res.licenseInfo);
+    }
+    return res;
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
 });
 
 ipcMain.handle('get-connectivity-status', () => {

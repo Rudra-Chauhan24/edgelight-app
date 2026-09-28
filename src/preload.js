@@ -83,6 +83,7 @@ contextBridge.exposeInMainWorld('edgeLightAPI', {
   openPaymentInBrowser: (url) => ipcRenderer.invoke('open-payment-in-browser', url),
   startPaymentSession: () => ipcRenderer.invoke('start-payment-session'),
   endPaymentSession: () => ipcRenderer.invoke('end-payment-session'),
+  activatePaymentRef: (params) => ipcRenderer.invoke('activate-payment-ref', params),
   onPaymentSessionStarted: (callback) => {
     const subscription = (_event, data) => callback(data);
     ipcRenderer.on('payment-session-started', subscription);
