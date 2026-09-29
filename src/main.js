@@ -107,7 +107,7 @@ function updateTrayMenu(isOn, controlsShown = isControlsVisible) {
   try {
     const contextMenu = Menu.buildFromTemplate([
       {
-        label: 'Edge Light',
+        label: `Edge Light v${app.getVersion()}`,
         enabled: false
       },
       {
@@ -220,7 +220,7 @@ function updateTrayMenu(isOn, controlsShown = isControlsVisible) {
     ]);
 
     tray.setContextMenu(contextMenu);
-    tray.setToolTip(`Edge Light (${isOn ? 'On' : 'Off'}) - ${licLabel}`);
+    tray.setToolTip(`Edge Light v${app.getVersion()} (${isOn ? 'On' : 'Off'}) - ${licLabel}`);
   } catch (err) {
     console.error('Tray update error:', err);
   }
