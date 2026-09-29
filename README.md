@@ -28,7 +28,7 @@
 - **Automatic Screen Calibration**: Detects monitor resolution on startup (768p through 4K) and scales ring thickness proportionally.
 - **Camera Activity Detection**: Reads Windows `CapabilityAccessManager` to activate illumination when a call begins and deactivate it when the camera closes.
 - **Cursor Avoidance & Click-Through**: Dynamic cutout prevents cursor obstruction while allowing standard window interactions beneath the overlay.
-- **Color Temperature Tuning**: Continuous adjustment between 3000K (warm) and 6500K (cool daylight).
+- **Color Temperature Tuning**: Continuous adjustment between 3744K (warm) and 6500K (cool daylight).
 - **Device-Bound Licensing**: Generates a persistent Hardware ID (HWID) based on machine components, backed by local AES-256-GCM encryption and remote Firestore verification.
 - **Included Trial**: 3-day evaluation period available upon first launch.
 
