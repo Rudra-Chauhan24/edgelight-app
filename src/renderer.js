@@ -825,9 +825,11 @@
   function isAnyModalOpen() {
     const licModal = licenseModal || document.getElementById('license-modal');
     const wizModal = wizardModal || document.getElementById('setup-wizard-modal');
+    const successOverlay = document.getElementById('payment-success-overlay');
     return Boolean(
       (licModal && licModal.classList.contains('visible')) ||
-      (wizModal && wizModal.classList.contains('visible'))
+      (wizModal && wizModal.classList.contains('visible')) ||
+      Boolean(successOverlay)
     );
   }
 
@@ -1891,8 +1893,20 @@
     try {
       localStorage.setItem(SETUP_COMPLETED_KEY, 'true');
     } catch (e) {}
+    stopPaymentActivationPolling();
     hideSetupWizard();
-    showStatus('✨ Edge Light is active & ready!', 2500);
+    hideLicenseModal();
+    const existing = document.getElementById('payment-success-overlay');
+    if (existing) existing.remove();
+
+    // Re-enable the ring/light if user is now licensed
+    if (licenseState && licenseState.isAuthorized) {
+      setOn(true);
+      power.classList.add('active');
+      power.setAttribute('aria-pressed', 'true');
+    }
+    showDock();
+    showStatus('✨ Edge Light is active & ready!', 3500);
   }
 
   // Step 1 event listeners
@@ -2235,26 +2249,60 @@
 
   // ── PAYMENT SUCCESS UI ─────────────────────────────────────────────
   function showPaymentSuccessUI(licInfo) {
+    licInfo = licInfo || {};
+    // Ensure licenseState is immediately updated in memory and UI
+    const planName = licInfo.planName || (licInfo.planId === 'monthly' ? 'Monthly Pass' : licInfo.planId === 'lifetime' ? 'Lifetime Pro' : '3-Month Pass');
+    licenseState = {
+      ...licenseState,
+      ...licInfo,
+      isAuthorized: true,
+      status: 'approved',
+      planName
+    };
+    updateLicenseUI(licenseState);
+
+    // Remove any existing success overlay first
+    const existing = document.getElementById('payment-success-overlay');
+    if (existing) existing.remove();
+
+    // Stop all ongoing polling
+    stopPaymentActivationPolling();
+
     const overlay = document.createElement('div');
     overlay.id = 'payment-success-overlay';
+    overlay.className = 'visible';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:200000;background:rgba(0,0,0,0.88);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);display:flex;align-items:center;justify-content:center;pointer-events:all !important;-webkit-app-region:no-drag;opacity:1;';
     overlay.innerHTML = `
-      <div class="psuccess-card">
+      <div class="psuccess-card" style="pointer-events:all !important;-webkit-app-region:no-drag;position:relative;z-index:200001;">
         <div class="psuccess-icon">🎉</div>
         <h2 class="psuccess-title">License Activated!</h2>
-        <p class="psuccess-plan">${licInfo.planName || 'Pro License'}</p>
+        <p class="psuccess-plan">${licenseState.planName || 'Monthly Pass'}</p>
         <p class="psuccess-msg">Your Edge Light is now fully licensed on this device.<br>
-        Hardware ID: <code>${licInfo.hwid || ''}</code></p>
-        <button class="primary-btn" id="paySuccessCloseBtn">✨ Start Using Edge Light</button>
+        Hardware ID: <code>${licenseState.hwid || ''}</code></p>
+        <button class="primary-btn pulse-glow" id="paySuccessCloseBtn" type="button" style="pointer-events:all !important;-webkit-app-region:no-drag;cursor:pointer;margin-top:8px;">✨ Start Using Edge Light</button>
       </div>
     `;
     document.body.appendChild(overlay);
-    setTimeout(() => overlay.classList.add('visible'), 10);
-    document.getElementById('paySuccessCloseBtn')?.addEventListener('click', () => {
-      overlay.classList.remove('visible');
-      setTimeout(() => overlay.remove(), 400);
-      hideSetupWizard();
-      hideLicenseModal();
-      showStatus('✓ Pro License Active — Edge Light unlocked!', 4000);
+    // Ensure click-through is OFF while overlay is visible
+    setClickThrough(false);
+
+    function closeSuccessOverlay() {
+      if (overlay.parentNode) overlay.remove();
+      completeWizard();
+    }
+
+    const closeBtn = document.getElementById('paySuccessCloseBtn');
+    if (closeBtn) {
+      closeBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        closeSuccessOverlay();
+      });
+    }
+
+    // Also allow clicking backdrop to close
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) closeSuccessOverlay();
     });
   }
 
@@ -2300,12 +2348,16 @@
   step3BackBtn?.addEventListener('click', () => goToWizardStep(2));
   step3NextBtn?.addEventListener('click', () => goToWizardStep(4));
 
+  const step4BackBtn = document.getElementById('step4BackBtn');
+  step4BackBtn?.addEventListener('click', () => goToWizardStep(3));
+
   // Step 4 event listeners
   finishWizardBtn?.addEventListener('click', () => completeWizard());
 
   // Wizard tab clicking
   stepTabs.forEach((tab) => {
-    tab.addEventListener('click', () => {
+    tab.addEventListener('click', (e) => {
+      e.stopPropagation();
       const s = parseInt(tab.dataset.step, 10);
       if (!isNaN(s)) goToWizardStep(s);
     });
