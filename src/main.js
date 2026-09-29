@@ -358,11 +358,42 @@ function createWindow() {
   // Initial mouse events ignore mode (clicks pass through transparent areas)
   mainWindow.setIgnoreMouseEvents(true, { forward: true });
 
+  // OS-level cursor tracking loop for rock-solid cursor hole cutout (even when window is unfocused/startup)
+  let lastCursorX = -9999;
+  let lastCursorY = -9999;
+  let cursorTrackerInterval = null;
+
+  function startCursorTracker() {
+    if (cursorTrackerInterval) return;
+    cursorTrackerInterval = setInterval(() => {
+      if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible()) return;
+      try {
+        const pt = screen.getCursorScreenPoint();
+        if (pt.x !== lastCursorX || pt.y !== lastCursorY) {
+          lastCursorX = pt.x;
+          lastCursorY = pt.y;
+          const bounds = mainWindow.getBounds();
+          const relX = pt.x - bounds.x;
+          const relY = pt.y - bounds.y;
+          mainWindow.webContents.send('cursor-position', { x: relX, y: relY });
+        }
+      } catch (e) {}
+    }, 16);
+  }
+
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
     startKeepTop();
+    startCursorTracker();
+
+    // Broadcast immediate cursor position on launch
+    try {
+      const pt = screen.getCursorScreenPoint();
+      const bounds = mainWindow.getBounds();
+      mainWindow.webContents.send('cursor-position', { x: pt.x - bounds.x, y: pt.y - bounds.y });
+    } catch (e) {}
 
     // Check for OTA updates 3.5s after launch
     setTimeout(async () => {
@@ -812,6 +843,17 @@ ipcMain.on('quit-app', () => {
 
 ipcMain.handle('get-app-version', () => {
   return app.getVersion();
+});
+
+ipcMain.handle('get-cursor-position', () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return { x: -9999, y: -9999 };
+  try {
+    const pt = screen.getCursorScreenPoint();
+    const bounds = mainWindow.getBounds();
+    return { x: pt.x - bounds.x, y: pt.y - bounds.y };
+  } catch (e) {
+    return { x: -9999, y: -9999 };
+  }
 });
 
 ipcMain.handle('toggle-fullscreen', () => {

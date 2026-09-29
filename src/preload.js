@@ -67,6 +67,12 @@ contextBridge.exposeInMainWorld('edgeLightAPI', {
     ipcRenderer.on('show-status', subscription);
     return () => ipcRenderer.removeListener('show-status', subscription);
   },
+  getCursorPosition: () => ipcRenderer.invoke('get-cursor-position'),
+  onCursorPosition: (callback) => {
+    const subscription = (_event, pos) => callback(pos);
+    ipcRenderer.on('cursor-position', subscription);
+    return () => ipcRenderer.removeListener('cursor-position', subscription);
+  },
   // OTA Updater APIs
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
   downloadUpdate: (url) => ipcRenderer.invoke('download-update', url),

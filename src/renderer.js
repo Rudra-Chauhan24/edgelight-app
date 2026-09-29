@@ -972,14 +972,33 @@
     }
   });
 
-  window.addEventListener('mousemove', (e) => {
-    state.mouseX = e.clientX;
-    state.mouseY = e.clientY;
-    mouseState.targetX = e.clientX;
-    mouseState.targetY = e.clientY;
+  function handleCursorMove(x, y) {
+    state.mouseX = x;
+    state.mouseY = y;
+    mouseState.targetX = x;
+    mouseState.targetY = y;
     if (state.avoidMouse && (state.on || renderState.thickScale > 0.001)) {
       requestRender();
     }
+  }
+
+  // OS-level continuous cursor tracking (works immediately after startup/shutdown & in background)
+  if (window.edgeLightAPI?.onCursorPosition) {
+    window.edgeLightAPI.onCursorPosition(({ x, y }) => {
+      handleCursorMove(x, y);
+    });
+  }
+
+  if (window.edgeLightAPI?.getCursorPosition) {
+    window.edgeLightAPI.getCursorPosition().then((pos) => {
+      if (pos && typeof pos.x === 'number' && pos.x > -1000) {
+        handleCursorMove(pos.x, pos.y);
+      }
+    }).catch(() => {});
+  }
+
+  window.addEventListener('mousemove', (e) => {
+    handleCursorMove(e.clientX, e.clientY);
 
     // When modal (license or wizard) is visible, never pass clicks through to background
     if (isAnyModalOpen()) {
@@ -1048,22 +1067,26 @@
     setClickThrough(false);
   });
 
-  window.addEventListener('mouseleave', () => {
-    mouseState.targetX = -9999;
-    mouseState.targetY = -9999;
-    mouseState.targetProximity = 0;
-    requestRender();
+  window.addEventListener('mouseleave', (e) => {
+    if (e.clientX < 0 || e.clientX >= window.innerWidth || e.clientY < 0 || e.clientY >= window.innerHeight) {
+      mouseState.targetX = -9999;
+      mouseState.targetY = -9999;
+      mouseState.targetProximity = 0;
+      requestRender();
+    }
     if (!isPointerDown && !isAnyModalOpen()) {
       isInteractingWithDock = false;
       setClickThrough(true);
     }
   });
 
-  document.addEventListener('mouseleave', () => {
-    mouseState.targetX = -9999;
-    mouseState.targetY = -9999;
-    mouseState.targetProximity = 0;
-    requestRender();
+  document.addEventListener('mouseleave', (e) => {
+    if (e.clientX < 0 || e.clientX >= window.innerWidth || e.clientY < 0 || e.clientY >= window.innerHeight) {
+      mouseState.targetX = -9999;
+      mouseState.targetY = -9999;
+      mouseState.targetProximity = 0;
+      requestRender();
+    }
     if (!isPointerDown && !isAnyModalOpen()) {
       isInteractingWithDock = false;
       setClickThrough(true);
