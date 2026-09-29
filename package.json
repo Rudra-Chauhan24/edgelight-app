@@ -27,6 +27,7 @@
       "forceCodeSigning": false
     },
     "nsis": {
+      "artifactName": "Edge.Light.Setup.${version}.${ext}",
       "oneClick": false,
       "perMachine": false,
       "allowElevation": false,
