@@ -104,7 +104,7 @@ class AppUpdater {
             releaseDate: ghRelease.published_at,
             notes: ghRelease.body || '✨ Edge Light update with new features and improvements.',
             downloadUrl: setupAsset?.browser_download_url
-              || `https://github.com/CHAUHANRUDRA24/edgelight-app/releases/download/${ghRelease.tag_name}/Edge.Light.Setup.${version}.exe`
+              || `https://github.com/Rudra-Chauhan24/edgelight-app/releases/download/${ghRelease.tag_name}/Edge.Light.Setup.${version}.exe`
           };
         } else if (ghRelease && ghRelease.version) {
           manifest = ghRelease;
@@ -252,7 +252,7 @@ class AppUpdater {
     console.log('[AppUpdater] Spawning installer:', installerPath);
 
     // Launch installer detached from current Electron process
-    const child = spawn(installerPath, [], {
+    const child = spawn(installerPath, ['/S'], {
       detached: true,
       stdio: 'ignore'
     });

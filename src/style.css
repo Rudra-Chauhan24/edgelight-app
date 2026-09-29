@@ -2066,26 +2066,30 @@ input[type="range"]:focus-visible,
   z-index: 99999;
   transition: transform 0.38s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.32s ease;
   user-select: none;
+  -webkit-app-region: no-drag;
 }
 
 .ota-banner.visible {
   transform: translate(-50%, 0);
   opacity: 1;
-  pointer-events: auto;
+  pointer-events: auto !important;
+  -webkit-app-region: no-drag;
 }
 
 .ota-content {
   display: flex;
   align-items: center;
   gap: 12px;
-  background: rgba(18, 22, 32, 0.88);
+  background: rgba(18, 22, 32, 0.94);
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
-  border: 1px solid rgba(255, 152, 0, 0.4);
-  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.55), 0 0 24px rgba(255, 152, 0, 0.2);
+  border: 1px solid rgba(255, 152, 0, 0.5);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.65), 0 0 24px rgba(255, 152, 0, 0.25);
   padding: 10px 18px;
   border-radius: 9999px;
   color: #ffffff;
+  pointer-events: auto !important;
+  -webkit-app-region: no-drag;
 }
 
 .ota-sparkle {
@@ -2150,6 +2154,8 @@ input[type="range"]:focus-visible,
   display: flex;
   align-items: center;
   gap: 8px;
+  pointer-events: auto !important;
+  -webkit-app-region: no-drag;
 }
 
 .ota-btn {
@@ -2161,6 +2167,8 @@ input[type="range"]:focus-visible,
   border: none;
   border-radius: 20px;
   cursor: pointer;
+  pointer-events: auto !important;
+  -webkit-app-region: no-drag;
   transition: all 0.2s ease;
   box-shadow: 0 4px 12px rgba(255, 119, 0, 0.35);
   white-space: nowrap;
@@ -2190,6 +2198,8 @@ input[type="range"]:focus-visible,
   color: rgba(255, 255, 255, 0.5);
   font-size: 14px;
   cursor: pointer;
+  pointer-events: auto !important;
+  -webkit-app-region: no-drag;
   padding: 4px 6px;
   border-radius: 50%;
   transition: all 0.2s;

@@ -826,10 +826,12 @@
     const licModal = licenseModal || document.getElementById('license-modal');
     const wizModal = wizardModal || document.getElementById('setup-wizard-modal');
     const successOverlay = document.getElementById('payment-success-overlay');
+    const ota = otaBanner || document.getElementById('ota-banner');
     return Boolean(
       (licModal && licModal.classList.contains('visible')) ||
       (wizModal && wizModal.classList.contains('visible')) ||
-      Boolean(successOverlay)
+      Boolean(successOverlay) ||
+      (ota && ota.classList.contains('visible'))
     );
   }
 
@@ -1000,7 +1002,19 @@
       );
     }
 
-    if (isInsideBar || isPointerDown) {
+    const otaEl = otaBanner || document.getElementById('ota-banner');
+    let isInsideOta = false;
+    if (otaEl && otaEl.classList.contains('visible')) {
+      const otaRect = otaEl.getBoundingClientRect();
+      isInsideOta = (
+        e.clientX >= otaRect.left &&
+        e.clientX <= otaRect.right &&
+        e.clientY >= otaRect.top &&
+        e.clientY <= otaRect.bottom
+      );
+    }
+
+    if (isInsideBar || isInsideOta || isPointerDown) {
       isInteractingWithDock = true;
       clearTimeout(idleTimer);
       setClickThrough(false);
@@ -2522,18 +2536,38 @@
     });
   }
 
-  // Display app version on dock badge
+  // Display app version on dock badge with 1-click update check
   const versionBadgeEl = document.getElementById('version-badge');
   if (versionBadgeEl) {
     if (window.edgeLightAPI?.getAppVersion) {
       window.edgeLightAPI.getAppVersion().then((ver) => {
         if (ver) versionBadgeEl.textContent = `v${ver}`;
       }).catch(() => {
-        versionBadgeEl.textContent = 'v1.0.5';
+        versionBadgeEl.textContent = 'v1.0.10';
       });
     } else {
-      versionBadgeEl.textContent = 'v1.0.5';
+      versionBadgeEl.textContent = 'v1.0.10';
     }
+
+    versionBadgeEl.style.cursor = 'pointer';
+    versionBadgeEl.title = 'Click to check for updates';
+    versionBadgeEl.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      showStatus('🔍 Checking for updates...', 2500);
+      try {
+        if (window.edgeLightAPI?.checkForUpdates) {
+          const res = await window.edgeLightAPI.checkForUpdates();
+          if (res && res.updateAvailable) {
+            showOtaBanner(res);
+            showStatus(`✨ Update v${res.latestVersion} available! Click Update Now above.`, 4000);
+          } else {
+            showStatus(`✓ Edge Light is up to date (${versionBadgeEl.textContent})`, 3000);
+          }
+        }
+      } catch (err) {
+        showStatus('Update check failed: ' + err.message, 3000);
+      }
+    });
   }
 
   // ── OVER-THE-AIR (OTA) UPDATE CONTROLLER ──────────────────────────
@@ -2570,6 +2604,10 @@
     }
   }
 
+  otaBanner?.addEventListener('mouseenter', () => setClickThrough(false));
+  otaBanner?.addEventListener('pointerenter', () => setClickThrough(false));
+  otaBanner?.addEventListener('mouseover', () => setClickThrough(false));
+
   otaCloseBtn?.addEventListener('click', (e) => {
     e.stopPropagation();
     hideOtaBanner();
@@ -2580,7 +2618,7 @@
     if (otaStatus === 'available') {
       if (!currentOtaUpdate?.downloadUrl) {
         showStatus('Opening releases page...', 2500);
-        window.edgeLightAPI?.openExternal?.('https://github.com/CHAUHANRUDRA24/edgelight-app/releases/latest');
+        window.edgeLightAPI?.openExternal?.('https://github.com/Rudra-Chauhan24/edgelight-app/releases/latest');
         hideOtaBanner();
         return;
       }
@@ -2633,6 +2671,12 @@
   if (window.edgeLightAPI?.onUpdateAvailable) {
     window.edgeLightAPI.onUpdateAvailable((info) => {
       showOtaBanner(info);
+    });
+  }
+
+  if (window.edgeLightAPI?.onShowStatus) {
+    window.edgeLightAPI.onShowStatus((msg) => {
+      showStatus(msg, 3500);
     });
   }
 })();

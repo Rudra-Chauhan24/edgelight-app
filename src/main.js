@@ -175,6 +175,24 @@ function updateTrayMenu(isOn, controlsShown = isControlsVisible) {
           }
         }
       },
+      {
+        label: 'Check for Updates…',
+        click: async () => {
+          try {
+            const update = await appUpdater.checkForUpdates();
+            if (update && update.updateAvailable && mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('update-available', update);
+            } else if (mainWindow && !mainWindow.isDestroyed()) {
+              const cur = update?.currentVersion || app.getVersion();
+              mainWindow.webContents.send('show-status', `✓ Edge Light is up to date (v${cur})`);
+            }
+          } catch (err) {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('show-status', 'Update check failed: ' + err.message);
+            }
+          }
+        }
+      },
       { type: 'separator' },
       {
         label: 'Launch at Login',
@@ -355,6 +373,16 @@ function createWindow() {
         }
       } catch (e) {}
     }, 3500);
+
+    // Periodic OTA update check every 15 minutes while running
+    setInterval(async () => {
+      try {
+        const update = await appUpdater.checkForUpdates();
+        if (update && update.updateAvailable && mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('update-available', update);
+        }
+      } catch (e) {}
+    }, 15 * 60 * 1000);
   });
 
   // Handle display resolution, scaling, or monitor connect/disconnect changes

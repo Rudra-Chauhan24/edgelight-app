@@ -62,6 +62,11 @@ contextBridge.exposeInMainWorld('edgeLightAPI', {
     ipcRenderer.on('show-setup-wizard', subscription);
     return () => ipcRenderer.removeListener('show-setup-wizard', subscription);
   },
+  onShowStatus: (callback) => {
+    const subscription = (_event, msg) => callback(msg);
+    ipcRenderer.on('show-status', subscription);
+    return () => ipcRenderer.removeListener('show-status', subscription);
+  },
   // OTA Updater APIs
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
   downloadUpdate: (url) => ipcRenderer.invoke('download-update', url),
