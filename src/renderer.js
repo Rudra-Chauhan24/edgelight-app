@@ -37,6 +37,13 @@
   const hwidDisplay = document.getElementById('hwidDisplay');
   const modalStatusBadge = document.getElementById('modalStatusBadge');
   const licenseDescription = document.getElementById('licenseDescription');
+  const otaBanner = document.getElementById('ota-banner');
+  const otaVersion = document.getElementById('ota-version');
+  const otaProgressBox = document.getElementById('ota-progress-box');
+  const otaProgressFill = document.getElementById('ota-progress-fill');
+  const otaProgressText = document.getElementById('ota-progress-text');
+  const otaActionBtn = document.getElementById('ota-action-btn');
+  const otaCloseBtn = document.getElementById('ota-close-btn');
 
   // License State
   let licenseState = {
@@ -555,23 +562,6 @@
     // ── macOS-Style Fluid Cursor Hole Spring Interpolation ──────────
     let targetP = 0;
     if (mouseState.targetX > -1000 && state.avoidMouse && state.on && renderState.thickScale > 0.05) {
-      if (mouseState.currentX < -1000) {
-        mouseState.currentX = mouseState.targetX;
-        mouseState.currentY = mouseState.targetY;
-      } else {
-        // High-precision adaptive tracking: snaps immediately on fast movement, silky glide on slow movement
-        const dx = mouseState.targetX - mouseState.currentX;
-        const dy = mouseState.targetY - mouseState.currentY;
-        const dist = Math.hypot(dx, dy);
-        const followTau = dist > 90 ? 6 : (dist > 30 ? 10 : 15);
-        const mouseFollow = 1 - Math.exp(-dt / followTau);
-        mouseState.currentX += dx * mouseFollow;
-        mouseState.currentY += dy * mouseFollow;
-        if (Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1) {
-          needsNextFrame = true;
-        }
-      }
-
       // Proximity calculation: seamless entry and exit across all 4 edges and corners
       const sw = window.innerWidth;
       const sh = window.innerHeight;
@@ -628,6 +618,28 @@
       // targetP: 1.0 everywhere inside the light band, smoothly dissolving as cursor retreats into screen center
       const approachZone = 110;
       targetP = Math.max(0, Math.min(1.0, (bandDepth + approachZone) / (approachZone - 15)));
+
+      // If cursor is deep in screen interior and hole is closed, snap without animating or triggering redraws
+      if (targetP === 0 && mouseState.currentProximity <= 0.002) {
+        mouseState.currentX = mouseState.targetX;
+        mouseState.currentY = mouseState.targetY;
+        mouseState.currentProximity = 0;
+      } else if (mouseState.currentX < -1000) {
+        mouseState.currentX = mouseState.targetX;
+        mouseState.currentY = mouseState.targetY;
+      } else {
+        // High-precision adaptive tracking: snaps immediately on fast movement, silky glide on slow movement
+        const dx = mouseState.targetX - mouseState.currentX;
+        const dy = mouseState.targetY - mouseState.currentY;
+        const dist = Math.hypot(dx, dy);
+        const followTau = dist > 90 ? 6 : (dist > 30 ? 10 : 15);
+        const mouseFollow = 1 - Math.exp(-dt / followTau);
+        mouseState.currentX += dx * mouseFollow;
+        mouseState.currentY += dy * mouseFollow;
+        if (Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1) {
+          needsNextFrame = true;
+        }
+      }
     }
 
     mouseState.targetProximity = targetP;
@@ -972,13 +984,23 @@
     }
   });
 
+  function isCursorNearBorder(x, y) {
+    const sw = window.innerWidth;
+    const sh = window.innerHeight;
+    const animThick = Math.max(6, Math.round(renderState.thickness || state.thickness || 96));
+    const activeZone = animThick + 140;
+    return (x <= activeZone || x >= sw - activeZone || y <= activeZone || y >= sh - activeZone);
+  }
+
   function handleCursorMove(x, y) {
     state.mouseX = x;
     state.mouseY = y;
     mouseState.targetX = x;
     mouseState.targetY = y;
     if (state.avoidMouse && (state.on || renderState.thickScale > 0.001)) {
-      requestRender();
+      if (mouseState.currentProximity > 0.005 || isCursorNearBorder(x, y)) {
+        requestRender();
+      }
     }
   }
 
@@ -1072,7 +1094,9 @@
       mouseState.targetX = -9999;
       mouseState.targetY = -9999;
       mouseState.targetProximity = 0;
-      requestRender();
+      if (mouseState.currentProximity > 0.005) {
+        requestRender();
+      }
     }
     if (!isPointerDown && !isAnyModalOpen()) {
       isInteractingWithDock = false;
@@ -1085,7 +1109,9 @@
       mouseState.targetX = -9999;
       mouseState.targetY = -9999;
       mouseState.targetProximity = 0;
-      requestRender();
+      if (mouseState.currentProximity > 0.005) {
+        requestRender();
+      }
     }
     if (!isPointerDown && !isAnyModalOpen()) {
       isInteractingWithDock = false;
@@ -2594,14 +2620,6 @@
   }
 
   // ── OVER-THE-AIR (OTA) UPDATE CONTROLLER ──────────────────────────
-  const otaBanner = document.getElementById('ota-banner');
-  const otaVersion = document.getElementById('ota-version');
-  const otaProgressBox = document.getElementById('ota-progress-box');
-  const otaProgressFill = document.getElementById('ota-progress-fill');
-  const otaProgressText = document.getElementById('ota-progress-text');
-  const otaActionBtn = document.getElementById('ota-action-btn');
-  const otaCloseBtn = document.getElementById('ota-close-btn');
-
   let currentOtaUpdate = null;
   let otaStatus = 'available'; // 'available' | 'downloading' | 'ready'
 

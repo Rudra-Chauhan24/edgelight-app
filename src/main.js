@@ -5,6 +5,11 @@ const https = require('https');
 const { LicenseManager } = require('./license-manager');
 const { AppUpdater } = require('./updater');
 
+// Optimize Chromium hardware acceleration and prevent background stutter
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('enable-gpu-rasterization');
+app.commandLine.appendSwitch('enable-zero-copy');
+
 // ── INTERNET CONNECTIVITY MONITOR ─────────────────────────────────
 let isOnline = true;
 let lastOnlineTime = Date.now();
@@ -281,7 +286,9 @@ let isPaymentSessionActive = false;
 function ensureTopmost(moveTop = false) {
   if (isPaymentSessionActive) return;
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.setAlwaysOnTop(true, 'screen-saver', 1);
+    if (!mainWindow.isAlwaysOnTop()) {
+      mainWindow.setAlwaysOnTop(true, 'screen-saver', 1);
+    }
     if (moveTop) {
       mainWindow.moveTop();
     }
@@ -293,10 +300,12 @@ function startKeepTop() {
   if (isPaymentSessionActive) return;
   ensureTopmost(false);
   keepTopInterval = setInterval(() => {
-    if (!isPaymentSessionActive) {
-      ensureTopmost(false);
+    if (!isPaymentSessionActive && mainWindow && !mainWindow.isDestroyed()) {
+      if (!mainWindow.isAlwaysOnTop()) {
+        mainWindow.setAlwaysOnTop(true, 'screen-saver', 1);
+      }
     }
-  }, 2000);
+  }, 5000);
 }
 
 function stopKeepTop() {
@@ -340,11 +349,9 @@ function createWindow() {
   mainWindow.setAlwaysOnTop(true, 'screen-saver', 1);
   mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 
-  // Ensure window strictly stays forward (topmost) above all apps, even when another app is focused
+  // When another app is focused, preserve always-on-top without re-stacking DWM
   mainWindow.on('blur', () => {
-    if (!isPaymentSessionActive) {
-      ensureTopmost();
-    }
+    // Window already has screen-saver level always-on-top; do not churn DWM on blur
   });
 
   // Prevent Windows from minimizing or demoting overlay when another app switches to fullscreen
@@ -367,9 +374,10 @@ function createWindow() {
     if (cursorTrackerInterval) return;
     cursorTrackerInterval = setInterval(() => {
       if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible()) return;
+      if (!currentLightState) return;
       try {
         const pt = screen.getCursorScreenPoint();
-        if (pt.x !== lastCursorX || pt.y !== lastCursorY) {
+        if (Math.abs(pt.x - lastCursorX) >= 2 || Math.abs(pt.y - lastCursorY) >= 2) {
           lastCursorX = pt.x;
           lastCursorY = pt.y;
           const bounds = mainWindow.getBounds();
@@ -378,7 +386,7 @@ function createWindow() {
           mainWindow.webContents.send('cursor-position', { x: relX, y: relY });
         }
       } catch (e) {}
-    }, 16);
+    }, 25);
   }
 
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
@@ -805,12 +813,7 @@ ipcMain.on('set-ignore-mouse-events', (event, ignore, options) => {
       win.setIgnoreMouseEvents(true, { forward: true });
     } else {
       win.setIgnoreMouseEvents(false);
-      win.setAlwaysOnTop(true, 'screen-saver', 1);
-      win.moveTop();
-      win.focus();
     }
-    // Maintain highest z-order so edge light strictly stays forward over all apps
-    ensureTopmost(true);
   }
 });
 
@@ -826,7 +829,7 @@ ipcMain.on('bring-to-front', (event) => {
 ipcMain.on('light-state-changed', (event, isOn) => {
   currentLightState = isOn;
   if (isOn) {
-    ensureTopmost(true);
+    ensureTopmost(false);
   }
   updateTrayMenu(isOn, isControlsVisible);
 });
@@ -955,7 +958,7 @@ function checkWebcamUsage() {
 function startWebcamMonitoring() {
   if (webcamMonitorInterval) clearInterval(webcamMonitorInterval);
   checkWebcamUsage();
-  webcamMonitorInterval = setInterval(checkWebcamUsage, 800);
+  webcamMonitorInterval = setInterval(checkWebcamUsage, 3000);
 }
 
 function stopWebcamMonitoring() {
