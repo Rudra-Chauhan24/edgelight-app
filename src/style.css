@@ -1625,6 +1625,22 @@ input[type="range"]:focus-visible,
   font-size: 14px;
 }
 
+.mac-help-text {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.65);
+  margin: 4px 0 6px 0;
+  line-height: 1.5;
+  padding: 0;
+}
+.mac-help-text code {
+  background: rgba(255, 159, 67, 0.15);
+  color: #ff9f43;
+  border-radius: 4px;
+  padding: 1px 4px;
+  font-family: 'Consolas', monospace;
+  font-size: 10.5px;
+}
+
 .mac-input-row {
   display: flex;
   gap: 8px;

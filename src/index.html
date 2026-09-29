@@ -350,14 +350,16 @@
             <div class="manual-activate-card">
               <div class="mac-header">
                 <span class="mac-icon">🔑</span>
-                <strong>Already Paid or Scanned QR? Enter Payment ID to Activate Instantly:</strong>
+                <strong>Already Paid? Enter Your Razorpay Payment ID to Unlock:</strong>
               </div>
+              <p class="mac-help-text">After paying via Razorpay, check your <b>email/SMS confirmation</b> for a Payment ID that starts with <code>pay_</code> (e.g. <code>pay_QKXxxxxxxxx</code>). Paste it below to activate your license instantly.</p>
               <div class="mac-input-row">
-                <input type="text" id="manualPaymentRefInput" class="mac-input" placeholder="Enter Razorpay Payment ID (e.g. pay_...) or 12-digit UPI Ref/UTR" />
+                <input type="text" id="manualPaymentRefInput" class="mac-input" placeholder="Paste Razorpay Payment ID (pay_XXXX...) or 12-digit UPI UTR" />
                 <button type="button" id="manualActivateBtn" class="mac-btn">⚡ Activate License</button>
               </div>
               <div id="manualFeedback" class="mac-feedback hidden"></div>
             </div>
+
 
             <!-- Active Payment Window Controller Banner (Visible when popup is open) -->
             <div id="checkoutActiveBanner" class="checkout-active-banner hidden">
@@ -418,21 +420,8 @@
     </div>
   </div>
 
-  <!-- Top Floating OTA Update Notification Banner -->
-  <div id="ota-banner" class="ota-banner">
-    <div class="ota-content">
-      <span class="ota-sparkle">✨</span>
-      <div class="ota-text">Update available: <strong id="ota-version">v1.0.8</strong></div>
-      <div class="ota-progress-box hidden" id="ota-progress-box">
-        <div class="ota-progress-fill" id="ota-progress-fill"></div>
-        <span class="ota-progress-text" id="ota-progress-text">0%</span>
-      </div>
-      <div class="ota-actions">
-        <button type="button" class="ota-btn" id="ota-action-btn">Update Now</button>
-        <button type="button" class="ota-close-btn" id="ota-close-btn" title="Dismiss">✕</button>
-      </div>
-    </div>
-  </div>
+
+
 
   <!-- Floating Non-Blocking Payment Status Pill (Active during checkout) -->
   <div id="payment-status-pill" class="payment-status-pill hidden">

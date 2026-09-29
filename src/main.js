@@ -631,7 +631,7 @@ ipcMain.handle('activate-payment-ref', async (event, params) => {
     const { paymentRef, planId } = params || {};
     const res = await licenseManager.activateWithPaymentRef(paymentRef, planId);
     if (res && res.success && mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('license-status-updated', res.licenseInfo);
+      mainWindow.webContents.send('license-status-changed', res.licenseInfo);
     }
     return res;
   } catch (err) {

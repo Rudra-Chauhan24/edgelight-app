@@ -1,6 +1,6 @@
 {
   "name": "edgelight",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Windows edge-light ring illumination overlay for video calls",
   "main": "src/main.js",
   "author": "EdgeLight Team",
