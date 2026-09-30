@@ -2069,7 +2069,13 @@
           hwid
         }).then((result) => {
           if (result && result.success) {
-            startPaymentActivationPolling(currentSelectedPlanId);
+            if (result.verified && result.licenseInfo) {
+              endPaymentSession(false);
+              showPaymentVerificationModal('verified', result.licenseInfo);
+            } else {
+              showPaymentVerificationModal('verifying', { planId: currentSelectedPlanId, hwid });
+              startPaymentActivationPolling(currentSelectedPlanId);
+            }
           }
         }).catch(() => {});
       } else if (window.edgeLightAPI?.openExternal) {
@@ -2164,31 +2170,44 @@
       feedbackEl.classList.remove('hidden');
     }
 
+    showPaymentVerificationModal('verifying', {
+      planId: planId || currentSelectedPlanId || 'quarterly',
+      paymentId: val,
+      hwid: licenseState.hwid
+    });
+
     try {
       if (window.edgeLightAPI?.activatePaymentRef) {
         const res = await window.edgeLightAPI.activatePaymentRef({
           paymentRef: val,
           planId: planId || currentSelectedPlanId || 'quarterly'
         });
-        if (res && res.success) {
+        if (res && res.success && res.licenseInfo) {
           if (feedbackEl) {
             feedbackEl.className = 'mac-feedback success';
             feedbackEl.textContent = '✓ Payment verified! Pro license activated 🎉';
           }
-          if (window.edgeLightAPI?.refreshLicenseInfo) {
-            const updated = await window.edgeLightAPI.refreshLicenseInfo();
-            updateLicenseUI(updated);
-            showPaymentSuccessUI(updated);
-          }
+          await endPaymentSession(false);
+          showPaymentVerificationModal('verified', res.licenseInfo);
           return;
         } else {
+          showPaymentVerificationModal('failed', {
+            error: res?.error || 'Payment verification failed. Please check your reference and try again.',
+            paymentId: val,
+            planId: planId || currentSelectedPlanId
+          });
           if (feedbackEl) {
             feedbackEl.className = 'mac-feedback error';
-            feedbackEl.textContent = res?.error || 'Payment verification failed. Please check your reference.';
+            feedbackEl.textContent = res?.error || 'Payment verification failed.';
           }
         }
       }
     } catch (e) {
+      showPaymentVerificationModal('failed', {
+        error: 'Verification error: ' + e.message,
+        paymentId: val,
+        planId: planId || currentSelectedPlanId
+      });
       if (feedbackEl) {
         feedbackEl.className = 'mac-feedback error';
         feedbackEl.textContent = 'Verification error: ' + e.message;
@@ -2221,8 +2240,7 @@
         const updated = await window.edgeLightAPI.refreshLicenseInfo();
         if (updated && updated.isAuthorized && updated.status === 'approved') {
           await endPaymentSession(false);
-          updateLicenseUI(updated);
-          showPaymentSuccessUI(updated);
+          showPaymentVerificationModal('verified', updated);
           return;
         }
       }
@@ -2289,7 +2307,10 @@
       pollCount++;
       if (pollCount > MAX_POLLS) {
         stopPaymentActivationPolling();
-        showStatus('⏳ Payment not yet confirmed. Check back later or contact support.', 5000);
+        showPaymentVerificationModal('failed', {
+          error: 'Payment verification timed out. If your payment was deducted, please enter your Payment ID or UPI Ref below.',
+          planId
+        });
         return;
       }
 
@@ -2298,8 +2319,7 @@
           const updated = await window.edgeLightAPI.refreshLicenseInfo();
           if (updated && updated.isAuthorized && updated.status === 'approved') {
             await endPaymentSession(false);
-            updateLicenseUI(updated);
-            showPaymentSuccessUI(updated);
+            showPaymentVerificationModal('verified', updated);
           }
         }
       } catch (e) {}
@@ -2311,63 +2331,283 @@
     if (paymentPollTimeout) { clearTimeout(paymentPollTimeout); paymentPollTimeout = null; }
   }
 
-  // ── PAYMENT SUCCESS UI ─────────────────────────────────────────────
-  function showPaymentSuccessUI(licInfo) {
-    licInfo = licInfo || {};
-    // Ensure licenseState is immediately updated in memory and UI
-    const planName = licInfo.planName || (licInfo.planId === 'monthly' ? 'Monthly Pass' : licInfo.planId === 'lifetime' ? 'Lifetime Pro' : '3-Month Pass');
-    licenseState = {
-      ...licenseState,
-      ...licInfo,
-      isAuthorized: true,
-      status: 'approved',
-      planName
-    };
-    updateLicenseUI(licenseState);
+  // ── DATE FORMATTING HELPER (DD/MM/YYYY) ───────────────────────────
+  function formatDateDDMMYYYY(dateInput) {
+    if (!dateInput) return null;
+    const d = new Date(dateInput);
+    if (isNaN(d.getTime())) return null;
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    return `${day}/${month}/${year}`;
+  }
 
-    // Remove any existing success overlay first
-    const existing = document.getElementById('payment-success-overlay');
+  function getVerifiedPlanName(data) {
+    if (data?.planName && data.planName !== '3-Day Free Trial') {
+      return data.planName;
+    }
+    const pid = String(data?.planId || currentSelectedPlanId || '').toLowerCase();
+    if (pid === 'monthly') return 'Monthly Pass';
+    if (pid === 'quarterly') return '3-Month Pass';
+    if (pid === 'lifetime') return 'Lifetime Pro';
+    return data?.planName || 'Monthly Pass';
+  }
+
+  function removePaymentVerificationModal() {
+    const existing = document.getElementById('payment-verification-overlay') ||
+                     document.getElementById('payment-success-overlay');
     if (existing) existing.remove();
+  }
 
-    // Stop all ongoing polling
-    stopPaymentActivationPolling();
+  // ── POST-PAYMENT FLOATING VERIFICATION MODAL ───────────────────────
+  function showPaymentVerificationModal(statusType, data) {
+    data = data || {};
+    removePaymentVerificationModal();
 
-    const overlay = document.createElement('div');
-    overlay.id = 'payment-success-overlay';
-    overlay.className = 'visible';
-    overlay.style.cssText = 'position:fixed;inset:0;z-index:200000;background:rgba(0,0,0,0.88);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);display:flex;align-items:center;justify-content:center;pointer-events:all !important;-webkit-app-region:no-drag;opacity:1;';
-    overlay.innerHTML = `
-      <div class="psuccess-card" style="pointer-events:all !important;-webkit-app-region:no-drag;position:relative;z-index:200001;">
-        <div class="psuccess-icon">🎉</div>
-        <h2 class="psuccess-title">License Activated!</h2>
-        <p class="psuccess-plan">${licenseState.planName || 'Monthly Pass'}</p>
-        <p class="psuccess-msg">Your Edge Light is now fully licensed on this device.<br>
-        Hardware ID: <code>${licenseState.hwid || ''}</code></p>
-        <button class="primary-btn pulse-glow" id="paySuccessCloseBtn" type="button" style="pointer-events:all !important;-webkit-app-region:no-drag;cursor:pointer;margin-top:8px;">✨ Start Using Edge Light</button>
-      </div>
-    `;
-    document.body.appendChild(overlay);
-    // Ensure click-through is OFF while overlay is visible
+    // Disable click-through so user can interact with modal
     setClickThrough(false);
 
-    function closeSuccessOverlay() {
-      if (overlay.parentNode) overlay.remove();
-      completeWizard();
-    }
+    const planName = getVerifiedPlanName(data);
+    const hwid = data.hwid || licenseState.hwid || '—';
+    const accessId = data.licenseKey || data.paymentId || data.accessId || '—';
 
-    const closeBtn = document.getElementById('paySuccessCloseBtn');
-    if (closeBtn) {
-      closeBtn.addEventListener('click', (e) => {
+    // Activated date strictly in DD/MM/YYYY format
+    const activatedStr = formatDateDDMMYYYY(data.paidAt || data.approvedAt) || formatDateDDMMYYYY(new Date());
+
+    // Valid until: "Lifetime" for lifetime plans, or DD/MM/YYYY for time-based plans
+    const isLifetime = (data.planId === 'lifetime') ||
+                       (String(planName).toLowerCase().includes('lifetime')) ||
+                       (!data.expiresAt && statusType === 'verified');
+    const validUntilStr = isLifetime ? 'Lifetime' : (formatDateDDMMYYYY(data.expiresAt) || '30 Days');
+
+    const overlay = document.createElement('div');
+    overlay.id = 'payment-verification-overlay';
+    overlay.className = 'visible';
+
+    if (statusType === 'verified') {
+      stopPaymentActivationPolling();
+      // Only now mark license as approved in memory & UI
+      licenseState = {
+        ...licenseState,
+        ...data,
+        isAuthorized: true,
+        status: 'approved',
+        planName
+      };
+      updateLicenseUI(licenseState);
+
+      overlay.innerHTML = `
+        <div class="verif-card" role="dialog" aria-modal="true" aria-labelledby="verifTitle">
+          <div class="verif-header">
+            <div class="verif-icon-circle verified">✓</div>
+            <h2 id="verifTitle" class="verif-title verified">Payment Verified ✓</h2>
+          </div>
+
+          <div class="verif-plan-bar">
+            <span class="verif-plan-name">${planName}</span>
+            <span class="verif-status-pill status-active">
+              <span class="verif-status-dot"></span>
+              Status: Active
+            </span>
+          </div>
+
+          <div class="verif-details-grid">
+            <div class="verif-field">
+              <span class="verif-label">Access ID</span>
+              <div class="verif-value-wrapper">
+                <code class="verif-code" title="${accessId}">${accessId}</code>
+                <button class="verif-copy-btn" id="verifCopyAccessIdBtn" type="button" title="Copy Access ID">📋</button>
+              </div>
+            </div>
+            <div class="verif-field">
+              <span class="verif-label">Hardware ID</span>
+              <div class="verif-value-wrapper">
+                <code class="verif-code" title="${hwid}">${hwid}</code>
+              </div>
+            </div>
+            <div class="verif-field">
+              <span class="verif-label">Activated</span>
+              <span class="verif-value">${activatedStr}</span>
+            </div>
+            <div class="verif-field">
+              <span class="verif-label">Valid Until</span>
+              <span class="verif-value highlight-valid">${validUntilStr}</span>
+            </div>
+          </div>
+
+          <div class="verif-confirmation">
+            <span class="verif-conf-icon">✓</span>
+            <span>Your Edge Light license is active on this device.</span>
+          </div>
+
+          <button id="startEdgeLightBtn" class="primary-btn verif-action-btn pulse-glow" type="button">
+            ✨ Start Using Edge Light
+          </button>
+        </div>
+      `;
+
+      document.body.appendChild(overlay);
+
+      // Copy Access ID handler
+      const copyBtn = document.getElementById('verifCopyAccessIdBtn');
+      copyBtn?.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        closeSuccessOverlay();
+        navigator.clipboard?.writeText(accessId);
+        copyBtn.textContent = '✓';
+        setTimeout(() => { copyBtn.textContent = '📋'; }, 1500);
+      });
+
+      // Start Using Edge Light handler
+      const startBtn = document.getElementById('startEdgeLightBtn');
+      startBtn?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        overlay.remove();
+        hideSetupWizard();
+        hideLicenseModal();
+        completeWizard();
+        if (!isLightingActive) {
+          toggleLight();
+        }
+      });
+
+    } else if (statusType === 'verifying') {
+      overlay.innerHTML = `
+        <div class="verif-card" role="dialog" aria-modal="true" aria-labelledby="verifTitle">
+          <div class="verif-header">
+            <div class="verif-spinner"></div>
+            <h2 id="verifTitle" class="verif-title">Verifying Payment...</h2>
+          </div>
+
+          <div class="verif-plan-bar">
+            <span class="verif-plan-name">${planName}</span>
+            <span class="verif-status-pill status-verifying">
+              <span class="verif-status-dot"></span>
+              Status: Verifying
+            </span>
+          </div>
+
+          <div class="verif-details-grid">
+            <div class="verif-field">
+              <span class="verif-label">Purchased Plan</span>
+              <span class="verif-value">${planName}</span>
+            </div>
+            <div class="verif-field">
+              <span class="verif-label">Hardware ID</span>
+              <div class="verif-value-wrapper">
+                <code class="verif-code" title="${hwid}">${hwid}</code>
+              </div>
+            </div>
+            ${data.paymentId ? `
+            <div class="verif-field full-width">
+              <span class="verif-label">Transaction Reference</span>
+              <div class="verif-value-wrapper">
+                <code class="verif-code">${data.paymentId}</code>
+              </div>
+            </div>` : ''}
+          </div>
+
+          <p class="verif-subtitle">Confirming transaction with licensing system. Please keep this window open…</p>
+
+          <div class="verif-pulse-track"></div>
+
+          <div class="verif-failed-actions" style="margin-top: 4px;">
+            <button id="verifCancelPollBtn" class="verif-btn-secondary" type="button">Cancel</button>
+          </div>
+        </div>
+      `;
+
+      document.body.appendChild(overlay);
+
+      const cancelBtn = document.getElementById('verifCancelPollBtn');
+      cancelBtn?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        stopPaymentActivationPolling();
+        overlay.remove();
+        if (!isAnyModalOpen() && !isPaymentSessionOpen) {
+          setClickThrough(true);
+        }
+      });
+
+    } else if (statusType === 'failed') {
+      stopPaymentActivationPolling();
+      const errorMsg = data.error || 'Payment could not be verified by the licensing system.';
+
+      overlay.innerHTML = `
+        <div class="verif-card" role="dialog" aria-modal="true" aria-labelledby="verifTitle">
+          <div class="verif-header">
+            <div class="verif-icon-circle failed">✕</div>
+            <h2 id="verifTitle" class="verif-title failed">Payment Verification Failed</h2>
+          </div>
+
+          <div class="verif-plan-bar">
+            <span class="verif-plan-name">${planName}</span>
+            <span class="verif-status-pill status-failed">
+              <span class="verif-status-dot"></span>
+              Status: Failed
+            </span>
+          </div>
+
+          <p class="verif-subtitle error-text">${errorMsg}</p>
+
+          <div class="verif-retry-box">
+            <span class="verif-label">Enter Razorpay Payment ID or 12-Digit UPI Ref:</span>
+            <div class="verif-input-row">
+              <input type="text" id="verifRetryInput" class="verif-input" placeholder="e.g. pay_XXXXX or 412345678901" value="${data.paymentId || ''}" />
+              <button id="verifRetrySubmitBtn" class="primary-btn verif-retry-submit" type="button">Verify</button>
+            </div>
+          </div>
+
+          <div class="verif-failed-actions">
+            <button id="verifCloseFailedBtn" class="verif-btn-secondary" type="button">Close</button>
+            <button id="verifReopenPayBtn" class="verif-btn-secondary" type="button">Re-open Checkout</button>
+          </div>
+        </div>
+      `;
+
+      document.body.appendChild(overlay);
+
+      const closeBtn = document.getElementById('verifCloseFailedBtn');
+      closeBtn?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        overlay.remove();
+        if (!isAnyModalOpen() && !isPaymentSessionOpen) {
+          setClickThrough(true);
+        }
+      });
+
+      const retryBtn = document.getElementById('verifRetrySubmitBtn');
+      const retryInput = document.getElementById('verifRetryInput');
+      retryBtn?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const refVal = retryInput?.value?.trim();
+        if (refVal) {
+          handleManualActivation(retryInput, null, data.planId || currentSelectedPlanId);
+        }
+      });
+
+      const reopenBtn = document.getElementById('verifReopenPayBtn');
+      reopenBtn?.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        overlay.remove();
+        const url = activePaymentUrl || (await resolvePaymentUrl()).url;
+        if (window.edgeLightAPI?.openPaymentWindow) {
+          startPaymentSession('window');
+        } else {
+          startPaymentSession('browser');
+        }
       });
     }
+  }
 
-    // Also allow clicking backdrop to close
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) closeSuccessOverlay();
-    });
+  // Alias for backward compatibility
+  function showPaymentSuccessUI(licInfo) {
+    showPaymentVerificationModal('verified', licInfo);
   }
 
   // Listen for payment window events (from main process)
@@ -2382,7 +2622,13 @@
     window.edgeLightAPI.onPaymentWindowClosed((result) => {
       if (checkoutActiveBanner) checkoutActiveBanner.classList.add('hidden');
       if (result && result.success) {
-        startPaymentActivationPolling(result.planId);
+        if (result.verified && result.licenseInfo) {
+          endPaymentSession(false);
+          showPaymentVerificationModal('verified', result.licenseInfo);
+        } else {
+          showPaymentVerificationModal('verifying', { planId: result.planId || currentSelectedPlanId, hwid: licenseState.hwid });
+          startPaymentActivationPolling(result.planId || currentSelectedPlanId);
+        }
       }
     });
   }

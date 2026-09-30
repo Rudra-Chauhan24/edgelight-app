@@ -612,32 +612,67 @@ ipcMain.handle('open-payment-window', async (event, params) => {
       }
     }
 
-    // Check for success/failure URL patterns after navigation
-    paymentWindow.webContents.on('did-navigate', (e, navUrl) => {
+    function extractPaymentId(navUrl) {
+      if (!navUrl) return null;
+      try {
+        const u = new URL(navUrl);
+        return u.searchParams.get('payment_id') ||
+               u.searchParams.get('razorpay_payment_id') ||
+               u.searchParams.get('pay_id') ||
+               null;
+      } catch (err) {
+        const m = String(navUrl).match(/(?:payment_id|razorpay_payment_id)=([a-zA-Z0-9_-]+)/i);
+        return m ? m[1] : null;
+      }
+    }
+
+    async function handlePaymentNav(navUrl) {
+      if (!navUrl) return;
       const lower = navUrl.toLowerCase();
+      const detectedPaymentId = extractPaymentId(navUrl);
+
+      if (detectedPaymentId) {
+        console.log(`[PaymentWindow] Captured verified payment ID: ${detectedPaymentId}`);
+        try {
+          const actResult = await licenseManager.activateWithPaymentRef(detectedPaymentId, planId);
+          if (actResult && actResult.success) {
+            safeResolve({
+              success: true,
+              verified: true,
+              paymentId: detectedPaymentId,
+              planId,
+              licenseInfo: actResult.licenseInfo
+            });
+            setTimeout(() => {
+              if (paymentWindow && !paymentWindow.isDestroyed()) paymentWindow.close();
+            }, 1200);
+            return;
+          }
+        } catch (e) {
+          console.error('[PaymentWindow] Verification error:', e);
+        }
+      }
+
       if (
-        lower.includes('payment_id=') ||
-        lower.includes('razorpay_payment_id') ||
         lower.includes('success') ||
         lower.includes('payment-success') ||
         lower.includes('order_id=')
       ) {
-        safeResolve({ success: true, url: navUrl, planId });
+        safeResolve({ success: true, verified: false, url: navUrl, planId });
         setTimeout(() => {
           if (paymentWindow && !paymentWindow.isDestroyed()) paymentWindow.close();
         }, 1500);
       }
+    }
+
+    // Check for success/failure URL patterns after navigation
+    paymentWindow.webContents.on('did-navigate', (e, navUrl) => {
+      handlePaymentNav(navUrl);
     });
 
     // Also watch for URL changes in-frame (SPA Razorpay checkout)
     paymentWindow.webContents.on('did-navigate-in-page', (e, navUrl) => {
-      const lower = navUrl.toLowerCase();
-      if (lower.includes('payment_id=') || lower.includes('razorpay_payment_id=')) {
-        safeResolve({ success: true, url: navUrl, planId });
-        setTimeout(() => {
-          if (paymentWindow && !paymentWindow.isDestroyed()) paymentWindow.close();
-        }, 1500);
-      }
+      handlePaymentNav(navUrl);
     });
 
     paymentWindow.on('closed', () => {

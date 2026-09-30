@@ -424,6 +424,8 @@ class LicenseManager {
           if (remote.doc.licenseKey) data.licenseKey = remote.doc.licenseKey;
           if (remote.doc.expiresAt !== undefined) data.expiresAt = remote.doc.expiresAt;
           if (remote.doc.paymentId) data.paymentId = remote.doc.paymentId;
+          if (remote.doc.paidAt) data.paidAt = remote.doc.paidAt;
+          if (remote.doc.approvedAt) data.approvedAt = remote.doc.approvedAt;
 
           data.lastDailyCheck = now;
           this.vault.write(data);
@@ -548,6 +550,9 @@ class LicenseManager {
       planId: data.planId || 'trial',
       planName: data.planName || '3-Day Free Trial',
       licenseKey: data.licenseKey || null,
+      paymentId: data.paymentId || null,
+      paidAt: data.paidAt || data.approvedAt || null,
+      approvedAt: data.approvedAt || data.paidAt || null,
       expiresAt: data.expiresAt || null,
       lastDailyCheck: data.lastDailyCheck || null
     };
@@ -827,6 +832,8 @@ class LicenseManager {
     data.licenseKey = key;
     data.expiresAt = expiresAt;
     data.paymentId = cleanRef;
+    data.paidAt = updateFields.paidAt;
+    data.approvedAt = updateFields.approvedAt;
     data.clockTampered = false;
     this.vault.write(data);
 
