@@ -240,53 +240,78 @@
             <p>100% money-back guarantee • All plans under ₹100 • Instant auto-activation via Razorpay</p>
           </div>
 
-          <!-- Plans Grid -->
+          <!-- Plans Grid (Vertical Stack) -->
           <div class="pricing-plans-grid" id="pricingGrid">
-            <!-- Monthly Plan -->
+            <!-- 1. Monthly Plan -->
             <div class="plan-card" data-plan-id="monthly">
-              <div class="plan-badge-top">Flexible</div>
-              <div class="plan-title">Monthly Pass</div>
-              <div class="plan-price">₹29 <span class="period">/ 30 days</span></div>
-              <div class="plan-sub">Cancel or renew anytime</div>
-              <ul class="plan-perks">
-                <li>✓ Full Screen Ring Glow</li>
-                <li>✓ 3744K–6500K Color Tuning</li>
-                <li>✓ Auto Video Call Detection</li>
-              </ul>
-              <div class="plan-select-tag">Select ₹29</div>
+              <div class="plan-card-body">
+                <div class="plan-info-left">
+                  <div class="plan-header-line">
+                    <span class="plan-title">Monthly Pass</span>
+                    <span class="plan-badge-top">Flexible</span>
+                  </div>
+                  <div class="plan-sub">Cancel or renew anytime</div>
+                  <ul class="plan-perks">
+                    <li>✓ Full Screen Ring Glow</li>
+                    <li>✓ 3744K–6500K Color Tuning</li>
+                    <li>✓ Auto Video Call Detection</li>
+                  </ul>
+                </div>
+                <div class="plan-price-right">
+                  <div class="plan-price">₹29 <span class="period">/ 30 days</span></div>
+                  <div class="plan-select-tag">Select ₹29</div>
+                </div>
+              </div>
             </div>
 
-            <!-- 3-Month Plan (Most Popular) -->
+            <!-- 2. 3-Month Plan (Most Popular) -->
             <div class="plan-card popular selected" data-plan-id="quarterly">
               <div class="popular-ribbon">⭐ MOST POPULAR • SAVE 45%</div>
-              <div class="plan-title">3-Month Pass</div>
-              <div class="plan-price">₹49 <span class="period">/ 90 days</span></div>
-              <div class="plan-sub">Only ~₹16 per month</div>
-              <ul class="plan-perks">
-                <li>✓ Everything in Monthly</li>
-                <li>✓ Priority Studio Calibration</li>
-                <li>✓ Free Feature Updates</li>
-              </ul>
-              <div class="plan-select-tag">Selected ✓</div>
+              <div class="plan-card-body">
+                <div class="plan-info-left">
+                  <div class="plan-header-line">
+                    <span class="plan-title">3-Month Pass</span>
+                  </div>
+                  <div class="plan-sub">Only ~₹16 per month</div>
+                  <ul class="plan-perks">
+                    <li>✓ Everything in Monthly</li>
+                    <li>✓ Priority Studio Calibration</li>
+                    <li>✓ Free Feature Updates</li>
+                  </ul>
+                </div>
+                <div class="plan-price-right">
+                  <div class="plan-price">₹49 <span class="period">/ 90 days</span></div>
+                  <div class="plan-select-tag">Selected ✓</div>
+                </div>
+              </div>
             </div>
 
-            <!-- Lifetime Plan (Best Value) -->
+            <!-- 3. Lifetime Plan (Best Value) -->
             <div class="plan-card best-value" data-plan-id="lifetime">
               <div class="popular-ribbon best">👑 BEST VALUE • FOREVER</div>
-              <div class="plan-title">Lifetime Pro</div>
-              <div class="plan-price">₹99 <span class="period">one-time</span></div>
-              <div class="plan-sub">Pay once, own forever</div>
-              <ul class="plan-perks">
-                <li>✓ Lifetime Unlimited Access</li>
-                <li>✓ 1 Machine Permanent HWID</li>
-                <li>✓ Zero Renewals Ever</li>
-              </ul>
-              <div class="plan-select-tag">Select ₹99</div>
+              <div class="plan-card-body">
+                <div class="plan-info-left">
+                  <div class="plan-header-line">
+                    <span class="plan-title">Lifetime Pro</span>
+                  </div>
+                  <div class="plan-sub">Pay once, own forever</div>
+                  <ul class="plan-perks">
+                    <li>✓ Lifetime Unlimited Access</li>
+                    <li>✓ 1 Machine Permanent HWID</li>
+                    <li>✓ Zero Renewals Ever</li>
+                  </ul>
+                </div>
+                <div class="plan-price-right">
+                  <div class="plan-price">₹99 <span class="period">one-time</span></div>
+                  <div class="plan-select-tag">Select ₹99</div>
+                </div>
+              </div>
             </div>
           </div>
 
-          <!-- ALL-IN-ONE VISIBLE PAYMENT TERMINAL -->
+          <!-- ALL-IN-ONE VISIBLE PAYMENT TERMINAL (VERTICAL FLOW) -->
           <div class="checkout-box payment-terminal-box">
+            <!-- 1. Selected Plan & Amount Header -->
             <div class="checkout-selected-header">
               <div class="csh-left">
                 <span class="csh-label">Selected Plan:</span>
@@ -297,9 +322,9 @@
               </div>
             </div>
 
-            <!-- Dual Payment Terminal Grid: QR Code & Razorpay Actions -->
-            <div class="payment-terminal-grid">
-              <!-- Left Column: UPI QR Code -->
+            <!-- 2. Vertical Payment Flow -->
+            <div class="payment-terminal-grid payment-terminal-vertical">
+              <!-- Top Block: UPI QR Code -->
               <div class="terminal-col upi-qr-col">
                 <div class="col-heading">
                   <span class="heading-icon">📱</span>
@@ -307,7 +332,7 @@
                 </div>
                 <div class="upi-qr-card">
                   <img id="upiQrImg" class="upi-qr-img" src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&amp;data=upi%3A%2F%2Fpay%3Fpa%3Dedgelight%40upi%26pn%3DEdgeLight%26am%3D49%26cu%3DINR" alt="UPI QR Code" />
-                  <div class="upi-badge-text">Google Pay • PhonePe • Paytm • CRED</div>
+                  <div class="upi-badge-text">Google Pay • PhonePe • Paytm • CRED • BHIM</div>
                 </div>
                 <div class="upi-details-row">
                   <span class="upi-id-label">UPI ID:</span>
@@ -316,7 +341,7 @@
                 </div>
               </div>
 
-              <!-- Right Column: Online Checkout (Razorpay) -->
+              <!-- Bottom Block: Online Checkout (Razorpay) -->
               <div class="terminal-col rzp-actions-col">
                 <div class="col-heading">
                   <span class="heading-icon">⚡</span>

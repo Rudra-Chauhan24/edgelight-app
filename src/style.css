@@ -994,22 +994,42 @@ input[type="range"]:focus-visible,
 .wizard-card {
   position: relative;
   z-index: 100001;
-  width: 92%;
-  max-width: 620px;
-  max-height: 90vh;
+  width: 94%;
+  max-width: 580px;
+  max-height: calc(100vh - 44px);
   overflow-y: auto;
-  background: rgba(20, 22, 28, 0.96);
+  overflow-x: hidden;
+  background: rgba(20, 22, 28, 0.97);
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 24px;
-  padding: 26px 30px;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.85), 0 0 40px rgba(255, 159, 67, 0.12);
+  padding: 24px 26px 28px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.88), 0 0 40px rgba(255, 159, 67, 0.12);
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  transform: scale(0.92);
+  gap: 16px;
+  transform: scale(0.94);
   transition: transform 320ms cubic-bezier(0.34, 1.56, 0.64, 1);
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+  scrollbar-color: rgba(255, 178, 102, 0.35) rgba(0, 0, 0, 0.2);
+  box-sizing: border-box;
+}
+
+.wizard-card::-webkit-scrollbar {
+  width: 6px;
+}
+
+.wizard-card::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+}
+
+.wizard-card::-webkit-scrollbar-thumb {
+  background: rgba(255, 178, 102, 0.35);
+  border-radius: 6px;
+}
+
+.wizard-card::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 178, 102, 0.6);
 }
 
 .wizard-modal.visible .wizard-card {
@@ -1275,53 +1295,112 @@ input[type="range"]:focus-visible,
   font-weight: 700;
 }
 
-/* ── Pricing Grid (Strictly Under ₹100) ───────────────────────── */
+/* ── Pricing Grid (Vertical Stack of Plans) ───────────────────── */
 .pricing-plans-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
-  margin-top: 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 4px;
+  width: 100%;
 }
 
 .plan-card {
   position: relative;
-  background: rgba(0, 0, 0, 0.35);
+  background: rgba(16, 18, 25, 0.88);
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 14px;
-  padding: 16px 12px 14px;
+  border-radius: 16px;
+  padding: 16px 20px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
   cursor: pointer;
-  transition: all var(--duration-fast);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .plan-card:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(26, 30, 40, 0.96);
   border-color: rgba(255, 179, 102, 0.4);
-  transform: translateY(-2px);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
 
 .plan-card.selected {
   background: rgba(255, 159, 67, 0.12);
   border-color: #ff9f43;
-  box-shadow: 0 0 20px rgba(255, 159, 67, 0.22);
+  box-shadow: 0 0 24px rgba(255, 159, 67, 0.25), inset 0 0 0 1px rgba(255, 159, 67, 0.35);
+}
+
+.plan-card-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  width: 100%;
+}
+
+.plan-info-left {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.plan-header-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.plan-badge-top {
+  font-size: 10px;
+  font-weight: 700;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  padding: 1px 8px;
+  border-radius: 999px;
+  letter-spacing: 0.02em;
+}
+
+.plan-price-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 520px) {
+  .plan-card-body {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .plan-price-right {
+    align-items: flex-start;
+    width: 100%;
+    flex-direction: row;
+    justify-content: space-between;
+  }
 }
 
 .popular-ribbon {
   position: absolute;
   top: -9px;
-  left: 50%;
-  transform: translateX(-50%);
+  right: 20px;
+  transform: none;
   background: linear-gradient(90deg, #ff9f43, #ff5252);
   color: #ffffff;
-  font-size: 8.5px;
+  font-size: 9px;
   font-weight: 800;
-  letter-spacing: 0.05em;
-  padding: 2px 8px;
+  letter-spacing: 0.04em;
+  padding: 2px 10px;
   border-radius: 999px;
   white-space: nowrap;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  z-index: 2;
 }
 
 .popular-ribbon.best {
@@ -1329,9 +1408,10 @@ input[type="range"]:focus-visible,
 }
 
 .plan-title {
-  font-size: 13px;
+  font-size: 14.5px;
   font-weight: 700;
   color: #ffffff;
+  letter-spacing: -0.01em;
 }
 
 .plan-price {
@@ -1339,43 +1419,58 @@ input[type="range"]:focus-visible,
   font-weight: 800;
   color: #ffb366;
   letter-spacing: -0.02em;
+  white-space: nowrap;
 }
 
 .plan-price .period {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 500;
   color: rgba(255, 255, 255, 0.5);
 }
 
 .plan-sub {
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.5);
-  margin-bottom: 4px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.55);
+  margin: 0;
 }
 
 .plan-perks {
   list-style: none;
   padding: 0;
-  margin: 0;
+  margin: 6px 0 0;
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 10px;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 11px;
   color: rgba(255, 255, 255, 0.75);
 }
 
+.plan-perks li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
 .plan-select-tag {
-  margin-top: auto;
-  padding-top: 8px;
-  text-align: center;
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.5);
+  color: rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 4px 14px;
+  border-radius: 999px;
+  transition: all 0.2s ease;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .plan-card.selected .plan-select-tag {
-  color: #ff9f43;
-  font-weight: 700;
+  color: #111827;
+  background: #ff9f43;
+  border-color: #ff9f43;
+  font-weight: 800;
+  box-shadow: 0 2px 10px rgba(255, 159, 67, 0.35);
 }
 
 /* ── Checkout Section ─────────────────────────────────────────── */
@@ -1425,36 +1520,34 @@ input[type="range"]:focus-visible,
   border-radius: 999px;
 }
 
-/* ── ALL-IN-ONE VISIBLE PAYMENT TERMINAL STYLES (v1.0.8) ── */
+/* ── ALL-IN-ONE VISIBLE PAYMENT TERMINAL (VERTICAL FLOW) ───────── */
 .payment-terminal-box {
-  background: rgba(13, 16, 23, 0.88);
+  background: rgba(13, 16, 23, 0.92);
   border: 1px solid rgba(255, 179, 102, 0.28);
   border-radius: 18px;
-  padding: 16px 20px;
+  padding: 18px 20px;
   display: flex;
   flex-direction: column;
   gap: 16px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.65), 0 0 24px rgba(255, 159, 67, 0.12);
-  margin-top: 4px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.65), 0 0 24px rgba(255, 159, 67, 0.1);
+  margin-top: 6px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
-.payment-terminal-grid {
-  display: grid;
-  grid-template-columns: 190px 1fr;
-  gap: 16px;
-  align-items: stretch;
-}
-
-@media (max-width: 580px) {
-  .payment-terminal-grid {
-    grid-template-columns: 1fr;
-  }
+.payment-terminal-grid,
+.payment-terminal-vertical {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  width: 100%;
 }
 
 .terminal-col {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  width: 100%;
 }
 
 .col-heading {
@@ -1472,28 +1565,38 @@ input[type="range"]:focus-visible,
   font-size: 14px;
 }
 
-/* ── Left Column: UPI QR Card ── */
+/* ── UPI QR Card Section (Vertical) ── */
+.upi-qr-col {
+  align-items: center;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 14px;
+  padding: 16px 14px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
 .upi-qr-card {
   background: #ffffff;
   border-radius: 14px;
-  padding: 10px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+  gap: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
 }
 
 .upi-qr-img {
-  width: 140px;
-  height: 140px;
+  width: 160px;
+  height: 160px;
   display: block;
   border-radius: 6px;
 }
 
 .upi-badge-text {
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
   color: #1e293b;
   text-align: center;
@@ -1503,21 +1606,22 @@ input[type="range"]:focus-visible,
 .upi-details-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  padding: 4px 8px;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 5px 12px;
   border-radius: 8px;
+  max-width: 100%;
 }
 
 .upi-id-label {
-  font-size: 10.5px;
+  font-size: 11px;
   color: rgba(255, 255, 255, 0.6);
 }
 
 .upi-id-code {
   font-family: 'Consolas', monospace;
-  font-size: 11px;
+  font-size: 11.5px;
   color: #38bdf8;
   font-weight: 700;
   flex: 1;
