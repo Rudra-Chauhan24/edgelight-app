@@ -2593,10 +2593,10 @@
       window.edgeLightAPI.getAppVersion().then((ver) => {
         if (ver) versionBadgeEl.textContent = `v${ver}`;
       }).catch(() => {
-        versionBadgeEl.textContent = 'v1.0.12';
+        versionBadgeEl.textContent = 'v1.0.13';
       });
     } else {
-      versionBadgeEl.textContent = 'v1.0.12';
+      versionBadgeEl.textContent = 'v1.0.13';
     }
 
     versionBadgeEl.style.cursor = 'pointer';

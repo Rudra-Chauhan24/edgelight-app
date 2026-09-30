@@ -64,7 +64,7 @@
     <div class="dock-footer">
       <button id="dismissBtn" class="dismiss-btn" type="button" title="Send controls to background / Hide" aria-label="Hide controls">✕</button>
       <div id="license-badge" class="license-badge" title="Click to view Device License & HWID" role="button" tabindex="0">Trial: 3d</div>
-      <div id="version-badge" class="version-badge" aria-label="App version">v1.0.12</div>
+      <div id="version-badge" class="version-badge" aria-label="App version">v1.0.13</div>
     </div>
   </div>
 
@@ -79,57 +79,63 @@
         <button id="closeLicenseBtn" class="license-close-btn" type="button" aria-label="Close modal">✕</button>
       </div>
       
-      <div class="license-body">
-        <div class="license-status-badge" id="modalStatusBadge">Checking status…</div>
+      <div class="license-body license-body-horizontal">
+        <!-- Left Column: Device & License Status -->
+        <div class="license-col license-col-status">
+          <div class="license-status-badge" id="modalStatusBadge">Checking status…</div>
 
-        <div class="hwid-box">
-          <div class="hwid-label">Device Hardware ID (HWID):</div>
-          <div class="hwid-code-wrap">
-            <code id="hwidDisplay">XXXX-XXXX-XXXX-XXXX</code>
-            <button id="copyHwidBtn" type="button" class="copy-btn" title="Copy HWID to clipboard">📋 Copy</button>
+          <div class="hwid-box">
+            <div class="hwid-label">Device Hardware ID (HWID):</div>
+            <div class="hwid-code-wrap">
+              <code id="hwidDisplay">XXXX-XXXX-XXXX-XXXX</code>
+              <button id="copyHwidBtn" type="button" class="copy-btn" title="Copy HWID to clipboard">📋 Copy</button>
+            </div>
+            <div class="hwid-note">Share this HWID with your administrator or include in payment to activate this machine.</div>
           </div>
-          <div class="hwid-note">Share this HWID with your administrator or include in payment to activate this machine.</div>
+
+          <div class="license-desc" id="licenseDescription">
+            Every machine automatically receives a 3-day free trial. To activate a commercial license, choose an affordable plan below powered by Razorpay:
+          </div>
+
+          <button id="openPlansFromLicenseBtn" class="secondary-btn" type="button">
+            ⚙️ Open Full Setup Wizard
+          </button>
         </div>
 
-        <div class="license-desc" id="licenseDescription">
-          Every machine automatically receives a 3-day free trial. To activate a commercial license, choose an affordable plan below powered by Razorpay:
-        </div>
+        <!-- Right Column: Instant Plan & Checkout -->
+        <div class="license-col license-col-payment">
+          <!-- Quick Plan Select inside License Modal -->
+          <div class="license-plans-quick">
+            <div class="lpq-label">Select Plan:</div>
+            <div class="lpq-grid">
+              <button type="button" class="lpq-btn" data-plan="monthly">Monthly ₹29</button>
+              <button type="button" class="lpq-btn active" data-plan="quarterly">3-Month ₹49 ⭐</button>
+              <button type="button" class="lpq-btn" data-plan="lifetime">Lifetime ₹99</button>
+            </div>
+          </div>
 
-        <!-- Quick Plan Select inside License Modal -->
-        <div class="license-plans-quick">
-          <div class="lpq-label">Select Plan:</div>
-          <div class="lpq-grid">
-            <button type="button" class="lpq-btn" data-plan="monthly">Monthly ₹29</button>
-            <button type="button" class="lpq-btn active" data-plan="quarterly">3-Month ₹49 ⭐</button>
-            <button type="button" class="lpq-btn" data-plan="lifetime">Lifetime ₹99</button>
+          <button id="licenseQuickPayBtn" class="primary-btn pulse-glow" type="button">
+            ⚡ Pay <span id="licenseQuickPrice">₹49</span> with Razorpay
+          </button>
+
+          <!-- UPI QR Code inside License Modal -->
+          <div class="license-upi-quick">
+            <div class="luq-label">Or Scan UPI QR (PhonePe / GPay / Paytm):</div>
+            <div class="luq-qr-wrap">
+              <img id="licenseModalQrImg" class="license-modal-qr" src="https://api.qrserver.com/v1/create-qr-code/?size=140x140&amp;data=upi%3A%2F%2Fpay%3Fpa%3Dedgelight%40upi%26pn%3DEdgeLight%26am%3D49%26cu%3DINR" alt="UPI QR" />
+            </div>
+          </div>
+
+          <!-- Manual Payment ID / UTR Input in License Modal -->
+          <div class="license-manual-wrap">
+            <div class="lmw-label">Already Paid? Enter Payment ID / UTR:</div>
+            <div class="lmw-row">
+              <input type="text" id="licenseManualInput" class="license-manual-input" placeholder="pay_XXXXX or 12-digit UPI UTR" />
+              <button type="button" id="licenseManualBtn" class="license-manual-btn">Activate</button>
+            </div>
+            <div id="licenseManualFeedback" class="license-manual-feedback hidden"></div>
           </div>
         </div>
-
-        <button id="licenseQuickPayBtn" class="primary-btn pulse-glow" type="button">
-          ⚡ Pay <span id="licenseQuickPrice">₹49</span> with Razorpay
-        </button>
-
-        <!-- UPI QR Code inside License Modal -->
-        <div class="license-upi-quick">
-          <div class="luq-label">Or Scan UPI QR (PhonePe / GPay / Paytm):</div>
-          <div class="luq-qr-wrap">
-            <img id="licenseModalQrImg" class="license-modal-qr" src="https://api.qrserver.com/v1/create-qr-code/?size=140x140&amp;data=upi%3A%2F%2Fpay%3Fpa%3Dedgelight%40upi%26pn%3DEdgeLight%26am%3D49%26cu%3DINR" alt="UPI QR" />
-          </div>
-        </div>
-
-        <!-- Manual Payment ID / UTR Input in License Modal -->
-        <div class="license-manual-wrap">
-          <div class="lmw-label">Already Paid? Enter Payment ID / UTR:</div>
-          <div class="lmw-row">
-            <input type="text" id="licenseManualInput" class="license-manual-input" placeholder="pay_XXXXX or 12-digit UPI UTR" />
-            <button type="button" id="licenseManualBtn" class="license-manual-btn">Activate</button>
-          </div>
-          <div id="licenseManualFeedback" class="license-manual-feedback hidden"></div>
-        </div>
-
-        <button id="openPlansFromLicenseBtn" class="secondary-btn" type="button">
-          ⚙️ Open Full Setup Wizard
-        </button>
       </div>
     </div>
   </div>
@@ -142,7 +148,7 @@
           <span class="wizard-logo">✨</span>
           <div>
             <h2 id="wizard-title" class="wizard-title">Edge Light Setup</h2>
-            <div class="wizard-subtitle">Professional Screen Illumination for Video Calls · v1.0.12</div>
+            <div class="wizard-subtitle">Professional Screen Illumination for Video Calls · v1.0.13</div>
           </div>
         </div>
         <button id="closeWizardBtn" class="wizard-close-btn" type="button" aria-label="Close setup wizard">✕</button>
