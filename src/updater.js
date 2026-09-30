@@ -79,13 +79,38 @@ class AppUpdater {
     });
   }
 
+  // Fallback: Check GitHub web redirect to /releases/tag/vX.Y.Z (never rate-limited)
+  fetchLatestReleaseRedirect() {
+    return new Promise((resolve, reject) => {
+      const req = https.get('https://github.com/Rudra-Chauhan24/edgelight-app/releases/latest', {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+        timeout: 6000
+      }, (res) => {
+        const location = res.headers.location;
+        if (location && location.includes('/releases/tag/')) {
+          const tag = location.split('/releases/tag/').pop().split('?')[0].trim();
+          const version = tag.replace(/^v/i, '').trim();
+          return resolve({
+            version,
+            releaseDate: new Date().toISOString(),
+            notes: `✨ Edge Light v${version} release.`,
+            downloadUrl: `https://github.com/Rudra-Chauhan24/edgelight-app/releases/download/${tag}/Edge.Light.Setup.${version}.exe`
+          });
+        }
+        reject(new Error(`Invalid redirect: ${location || res.statusCode}`));
+      });
+      req.on('timeout', () => { req.destroy(); reject(new Error('Redirect check timed out')); });
+      req.on('error', reject);
+    });
+  }
+
   async checkForUpdates() {
     let currentVersion = this.currentVersion;
     if (!currentVersion) {
       try {
         currentVersion = app?.getVersion ? app.getVersion() : require('../package.json').version;
       } catch (e) {
-        currentVersion = '1.0.6';
+        currentVersion = require('../package.json').version;
       }
     }
 
@@ -98,7 +123,7 @@ class AppUpdater {
         if (ghRelease && ghRelease.tag_name) {
           const setupAsset = ghRelease.assets?.find(a => a.name.endsWith('.exe') && a.name.toLowerCase().includes('setup'))
             || ghRelease.assets?.find(a => a.name.endsWith('.exe'));
-          const version = ghRelease.tag_name.replace(/^v/i, '');
+          const version = ghRelease.tag_name.replace(/^v/i, '').trim();
           manifest = {
             version,
             releaseDate: ghRelease.published_at,
@@ -110,10 +135,15 @@ class AppUpdater {
           manifest = ghRelease;
         }
       } catch (ghErr) {
-        // 2. Fallback: backend manifest endpoint
+        // 2. Secondary: Fallback to GitHub Web Releases redirect (bypasses GitHub API rate limit)
         try {
-          manifest = await this.fetchJson(this.fallbackUrl);
-        } catch (e) {}
+          manifest = await this.fetchLatestReleaseRedirect();
+        } catch (redirErr) {
+          // 3. Tertiary: backend manifest endpoint
+          try {
+            manifest = await this.fetchJson(this.fallbackUrl);
+          } catch (e) {}
+        }
       }
 
       if (!manifest || !manifest.version) {

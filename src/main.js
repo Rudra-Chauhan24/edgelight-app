@@ -186,7 +186,7 @@ function updateTrayMenu(isOn, controlsShown = isControlsVisible) {
           try {
             const update = await appUpdater.checkForUpdates();
             if (update && update.updateAvailable && mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('update-available', update);
+              mainWindow.webContents.send('update-available', { ...update, isManualCheck: true });
             } else if (mainWindow && !mainWindow.isDestroyed()) {
               const cur = update?.currentVersion || app.getVersion();
               mainWindow.webContents.send('show-status', `✓ Edge Light is up to date (v${cur})`);

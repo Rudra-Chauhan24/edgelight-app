@@ -2210,6 +2210,31 @@ input[type="range"]:focus-visible,
   box-shadow: none;
 }
 
+.ota-remind-btn {
+  background: rgba(255, 255, 255, 0.08);
+  color: #cbd5e1;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 20px;
+  cursor: pointer;
+  pointer-events: auto !important;
+  -webkit-app-region: no-drag;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.ota-remind-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.ota-remind-btn:active {
+  transform: translateY(0);
+}
+
 .ota-close-btn {
   background: transparent;
   border: none;

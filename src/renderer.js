@@ -43,6 +43,7 @@
   const otaProgressFill = document.getElementById('ota-progress-fill');
   const otaProgressText = document.getElementById('ota-progress-text');
   const otaActionBtn = document.getElementById('ota-action-btn');
+  const otaRemindBtn = document.getElementById('ota-remind-btn');
   const otaCloseBtn = document.getElementById('ota-close-btn');
 
   // License State
@@ -2622,9 +2623,37 @@
   // ── OVER-THE-AIR (OTA) UPDATE CONTROLLER ──────────────────────────
   let currentOtaUpdate = null;
   let otaStatus = 'available'; // 'available' | 'downloading' | 'ready'
+  const DISMISSED_UPDATE_KEY = 'edgelight_dismissed_update_version';
+  const DISMISSED_UPDATE_TIME_KEY = 'edgelight_dismissed_update_time';
+  const REMIND_LATER_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+  function isUpdateDismissed(version) {
+    try {
+      const dismissedVer = localStorage.getItem(DISMISSED_UPDATE_KEY);
+      const dismissedTime = parseInt(localStorage.getItem(DISMISSED_UPDATE_TIME_KEY), 10) || 0;
+      if (dismissedVer === version && (Date.now() - dismissedTime < REMIND_LATER_INTERVAL_MS)) {
+        return true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  function markUpdateDismissed(version) {
+    try {
+      localStorage.setItem(DISMISSED_UPDATE_KEY, version);
+      localStorage.setItem(DISMISSED_UPDATE_TIME_KEY, String(Date.now()));
+    } catch (_) {}
+  }
 
   function showOtaBanner(updateInfo) {
     if (!otaBanner || !updateInfo || !updateInfo.updateAvailable) return;
+
+    // Do not repeatedly show if the user dismissed this specific version recently (unless manually triggered)
+    if (!updateInfo.isManualCheck && isUpdateDismissed(updateInfo.latestVersion)) {
+      console.log(`[AppUpdater] Update v${updateInfo.latestVersion} previously dismissed / remind later active.`);
+      return;
+    }
+
     currentOtaUpdate = updateInfo;
     otaStatus = 'available';
     if (otaVersion) otaVersion.textContent = `v${updateInfo.latestVersion}`;
@@ -2645,24 +2674,26 @@
     }
   }
 
+  function dismissUpdateBanner(e) {
+    if (e) e.stopPropagation();
+    if (currentOtaUpdate?.latestVersion) {
+      markUpdateDismissed(currentOtaUpdate.latestVersion);
+      showStatus(`Update v${currentOtaUpdate.latestVersion} dismissed. Reminding later.`, 3000);
+    }
+    hideOtaBanner();
+  }
+
   otaBanner?.addEventListener('mouseenter', () => setClickThrough(false));
   otaBanner?.addEventListener('pointerenter', () => setClickThrough(false));
   otaBanner?.addEventListener('mouseover', () => setClickThrough(false));
 
-  otaCloseBtn?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    hideOtaBanner();
-  });
+  otaCloseBtn?.addEventListener('click', dismissUpdateBanner);
+  otaRemindBtn?.addEventListener('click', dismissUpdateBanner);
 
   otaActionBtn?.addEventListener('click', async (e) => {
     e.stopPropagation();
     if (otaStatus === 'available') {
-      if (!currentOtaUpdate?.downloadUrl) {
-        showStatus('Opening releases page...', 2500);
-        window.edgeLightAPI?.openExternal?.('https://github.com/Rudra-Chauhan24/edgelight-app/releases/latest');
-        hideOtaBanner();
-        return;
-      }
+      const downloadTarget = currentOtaUpdate?.downloadUrl || `https://github.com/Rudra-Chauhan24/edgelight-app/releases/download/v${currentOtaUpdate?.latestVersion}/Edge.Light.Setup.${currentOtaUpdate?.latestVersion}.exe`;
       otaStatus = 'downloading';
       otaActionBtn.textContent = 'Downloading...';
       otaActionBtn.classList.add('downloading');
@@ -2672,23 +2703,30 @@
 
       try {
         if (window.edgeLightAPI?.downloadUpdate) {
-          const res = await window.edgeLightAPI.downloadUpdate(currentOtaUpdate.downloadUrl);
+          const res = await window.edgeLightAPI.downloadUpdate(downloadTarget);
           if (res && res.success) {
             otaStatus = 'ready';
             otaActionBtn.classList.remove('downloading');
             otaActionBtn.textContent = 'Restart & Install';
             otaProgressBox?.classList.add('hidden');
             showStatus('✓ Update downloaded. Click to restart & install.', 3500);
+            return;
           }
         }
       } catch (err) {
         console.error('Download update error:', err);
-        otaStatus = 'available';
-        otaActionBtn.classList.remove('downloading');
-        otaActionBtn.textContent = 'Retry Update';
-        otaProgressBox?.classList.add('hidden');
-        showStatus('Download failed: ' + err.message, 3000);
       }
+
+      // Direct fallback: Open verified download link in default browser
+      try {
+        window.edgeLightAPI?.openExternal?.(downloadTarget);
+      } catch (_) {}
+      otaStatus = 'available';
+      otaActionBtn.classList.remove('downloading');
+      otaActionBtn.textContent = 'Update Now';
+      otaProgressBox?.classList.add('hidden');
+      showStatus('Opening latest release download...', 3500);
+      hideOtaBanner();
     } else if (otaStatus === 'ready') {
       otaActionBtn.textContent = 'Restarting...';
       try {

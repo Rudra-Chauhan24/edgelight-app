@@ -13,11 +13,11 @@
   <canvas id="light"></canvas>
 
   <!-- Top Floating OTA Update Notification Banner -->
-  <div id="ota-banner" class="ota-banner hidden" role="alert" aria-live="assertive">
+  <div id="ota-banner" class="ota-banner" role="alert" aria-live="assertive">
     <div class="ota-content">
       <span class="ota-sparkle">✨</span>
       <div class="ota-text">
-        <span>Edge Light <strong id="ota-version">v1.0.12</strong> is ready!</span>
+        <span>Edge Light <strong id="ota-version">v1.0.x</strong> is available!</span>
       </div>
       <div id="ota-progress-box" class="ota-progress-box hidden">
         <div id="ota-progress-fill" class="ota-progress-fill"></div>
@@ -25,6 +25,7 @@
       </div>
       <div class="ota-actions">
         <button id="ota-action-btn" class="ota-btn" type="button">Update Now</button>
+        <button id="ota-remind-btn" class="ota-remind-btn" type="button" title="Remind Later">Remind Later</button>
         <button id="ota-close-btn" class="ota-close-btn" type="button" title="Dismiss">✕</button>
       </div>
     </div>
