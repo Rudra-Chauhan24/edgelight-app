@@ -2701,15 +2701,26 @@
       if (otaProgressFill) otaProgressFill.style.setProperty('--progress', '0%');
       if (otaProgressText) otaProgressText.textContent = '0%';
 
+      otaRemindBtn?.classList.add('hidden');
+      otaCloseBtn?.classList.add('hidden');
+
       try {
         if (window.edgeLightAPI?.downloadUpdate) {
           const res = await window.edgeLightAPI.downloadUpdate(downloadTarget);
           if (res && res.success) {
-            otaStatus = 'ready';
+            otaStatus = 'reopening';
             otaActionBtn.classList.remove('downloading');
-            otaActionBtn.textContent = 'Restart & Install';
-            otaProgressBox?.classList.add('hidden');
-            showStatus('✓ Update downloaded. Click to restart & install.', 3500);
+            otaActionBtn.textContent = 'Reopening...';
+            if (otaProgressFill) otaProgressFill.style.setProperty('--progress', '100%');
+            if (otaProgressText) otaProgressText.textContent = '100%';
+            showStatus('✓ Update ready! Automatically installing & reopening Edge Light...', 3500);
+
+            // Automatically launch installer and reopen updated app directly
+            setTimeout(() => {
+              if (window.edgeLightAPI?.installUpdate) {
+                window.edgeLightAPI.installUpdate();
+              }
+            }, 600);
             return;
           }
         }
@@ -2724,11 +2735,13 @@
       otaStatus = 'available';
       otaActionBtn.classList.remove('downloading');
       otaActionBtn.textContent = 'Update Now';
+      otaRemindBtn?.classList.remove('hidden');
+      otaCloseBtn?.classList.remove('hidden');
       otaProgressBox?.classList.add('hidden');
       showStatus('Opening latest release download...', 3500);
       hideOtaBanner();
-    } else if (otaStatus === 'ready') {
-      otaActionBtn.textContent = 'Restarting...';
+    } else if (otaStatus === 'ready' || otaStatus === 'reopening') {
+      otaActionBtn.textContent = 'Reopening...';
       try {
         if (window.edgeLightAPI?.installUpdate) {
           window.edgeLightAPI.installUpdate();

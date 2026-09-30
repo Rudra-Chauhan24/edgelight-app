@@ -272,26 +272,56 @@ class AppUpdater {
     });
   }
 
-  // Execute installer and quit old instance
+  // Execute installer silently and automatically reopen Edge Light
   installUpdate() {
     if (!this.downloadedFilePath || !fs.existsSync(this.downloadedFilePath)) {
       throw new Error('Downloaded installer executable not found. Please download the update first.');
     }
 
     const installerPath = this.downloadedFilePath;
+    const currentExe = process.execPath;
     console.log('[AppUpdater] Spawning installer:', installerPath);
+    console.log('[AppUpdater] Will reopen:', currentExe);
 
-    // Launch installer detached from current Electron process
-    const child = spawn(installerPath, ['/S'], {
-      detached: true,
-      stdio: 'ignore'
-    });
-    child.unref();
+    const tempDir = app?.getPath ? app.getPath('temp') : os.tmpdir();
+    const updateBat = path.join(tempDir, `edgelight-update-reopen-${Date.now()}.bat`);
+
+    // Clean Windows batch script that:
+    // 1. Waits for current process to quit cleanly
+    // 2. Runs the NSIS installer silently (/S) and waits for completion
+    // 3. Immediately relaunches Edge Light!
+    // 4. Safely self-deletes
+    const batContent = [
+      '@echo off',
+      'timeout /t 1 /nobreak >nul',
+      `"${installerPath}" /S`,
+      'timeout /t 1 /nobreak >nul',
+      `start "" "${currentExe}"`,
+      '(goto) 2>nul & del "%~f0"'
+    ].join('\r\n');
+
+    try {
+      fs.writeFileSync(updateBat, batContent, 'utf8');
+      const child = spawn('cmd.exe', ['/c', updateBat], {
+        detached: true,
+        stdio: 'ignore'
+      });
+      child.unref();
+    } catch (e) {
+      console.warn('[AppUpdater] Batch helper failed, falling back to direct spawn:', e.message);
+      const child = spawn(installerPath, ['/S'], {
+        detached: true,
+        stdio: 'ignore'
+      });
+      child.unref();
+    }
 
     // Cleanly quit current application
     setTimeout(() => {
-      app.isQuitting = true;
-      app.quit();
+      if (app) {
+        app.isQuitting = true;
+        app.quit();
+      }
     }, 400);
 
     return true;
