@@ -106,11 +106,11 @@ it('landing.css styles .copy-upi code with interactive hover', () => {
 });
 
 // 9. Check executable availability in both locations
-it('Edge.Light.Setup.1.0.13.exe exists in both landing-page and root', () => {
-  const rootExe = path.join(__dirname, '../Edge.Light.Setup.1.0.13.exe');
-  const landingExe = path.join(landingDir, 'Edge.Light.Setup.1.0.13.exe');
-  assert(fs.existsSync(rootExe), 'Missing Edge.Light.Setup.1.0.13.exe in root');
-  assert(fs.existsSync(landingExe), 'Missing Edge.Light.Setup.1.0.13.exe in landing-page');
+it('Edge.Light.Setup.1.0.14.exe exists in both landing-page and root', () => {
+  const rootExe = path.join(__dirname, '../Edge.Light.Setup.1.0.14.exe');
+  const landingExe = path.join(landingDir, 'Edge.Light.Setup.1.0.14.exe');
+  assert(fs.existsSync(rootExe), 'Missing Edge.Light.Setup.1.0.14.exe in root');
+  assert(fs.existsSync(landingExe), 'Missing Edge.Light.Setup.1.0.14.exe in landing-page');
   assert(fs.statSync(rootExe).size > 50 * 1024 * 1024, 'Root exe size is too small');
   assert(fs.statSync(landingExe).size > 50 * 1024 * 1024, 'Landing page exe size is too small');
 });
