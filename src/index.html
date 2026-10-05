@@ -12,21 +12,41 @@
   <!-- Screen-edge Ring Canvas -->
   <canvas id="light"></canvas>
 
-  <!-- Top Floating OTA Update Notification Banner -->
-  <div id="ota-banner" class="ota-banner" role="alert" aria-live="assertive">
+  <!-- Top Floating OTA Update Notification Banner / Popup -->
+  <div id="ota-banner" class="ota-banner" role="dialog" aria-modal="true" aria-labelledby="ota-title">
     <div class="ota-content">
-      <span class="ota-sparkle">✨</span>
-      <div class="ota-text">
-        <span>Edge Light <strong id="ota-version">v1.0.x</strong> is available!</span>
+      <div class="ota-header">
+        <div class="ota-header-title">
+          <span class="ota-sparkle">✨</span>
+          <h3 id="ota-title" class="ota-title">New Update Available</h3>
+        </div>
+        <button id="ota-close-btn" class="ota-close-btn" type="button" title="Dismiss" aria-label="Close update popup">✕</button>
       </div>
-      <div id="ota-progress-box" class="ota-progress-box hidden">
-        <div id="ota-progress-fill" class="ota-progress-fill"></div>
-        <span id="ota-progress-text" class="ota-progress-text">0%</span>
+
+      <div class="ota-body">
+        <div class="ota-version-row">
+          <div class="ota-version-pill current">
+            <span class="ov-label">Current:</span>
+            <span id="ota-current-version" class="ov-val">v1.0.15</span>
+          </div>
+          <span class="ota-version-arrow">→</span>
+          <div class="ota-version-pill new">
+            <span class="ov-label">New:</span>
+            <strong id="ota-version" class="ov-val">v1.0.16</strong>
+          </div>
+        </div>
+
+        <p id="ota-message" class="ota-message">A newer version of Edge Light is available with performance improvements and updates.</p>
+
+        <div id="ota-progress-box" class="ota-progress-box hidden">
+          <div id="ota-progress-fill" class="ota-progress-fill"></div>
+          <span id="ota-progress-text" class="ota-progress-text">0%</span>
+        </div>
       </div>
+
       <div class="ota-actions">
+        <button id="ota-remind-btn" class="ota-remind-btn" type="button" title="Remind Later">Later</button>
         <button id="ota-action-btn" class="ota-btn" type="button">Update Now</button>
-        <button id="ota-remind-btn" class="ota-remind-btn" type="button" title="Remind Later">Remind Later</button>
-        <button id="ota-close-btn" class="ota-close-btn" type="button" title="Dismiss">✕</button>
       </div>
     </div>
   </div>

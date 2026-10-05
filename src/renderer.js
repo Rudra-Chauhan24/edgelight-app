@@ -45,6 +45,8 @@
   const otaActionBtn = document.getElementById('ota-action-btn');
   const otaRemindBtn = document.getElementById('ota-remind-btn');
   const otaCloseBtn = document.getElementById('ota-close-btn');
+  const otaCurrentVersion = document.getElementById('ota-current-version');
+  const otaMessage = document.getElementById('ota-message');
 
   // License State
   let licenseState = {
@@ -2809,10 +2811,12 @@
     }
   });
 
-  // ESC key dismisses active modal
+  // ESC key dismisses active modal or update popup
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      if (wizardModal?.classList.contains('visible')) {
+      if (otaBanner?.classList.contains('visible')) {
+        dismissUpdateBanner(e);
+      } else if (wizardModal?.classList.contains('visible')) {
         hideSetupWizard();
       } else if (licenseModal?.classList.contains('visible')) {
         hideLicenseModal();
@@ -3001,6 +3005,9 @@
 
   function isUpdateDismissed(version) {
     try {
+      if (sessionStorage.getItem('edgelight_dismissed_' + version) === 'true') {
+        return true;
+      }
       const dismissedVer = localStorage.getItem(DISMISSED_UPDATE_KEY);
       const dismissedTime = parseInt(localStorage.getItem(DISMISSED_UPDATE_TIME_KEY), 10) || 0;
       if (dismissedVer === version && (Date.now() - dismissedTime < REMIND_LATER_INTERVAL_MS)) {
@@ -3012,6 +3019,7 @@
 
   function markUpdateDismissed(version) {
     try {
+      sessionStorage.setItem('edgelight_dismissed_' + version, 'true');
       localStorage.setItem(DISMISSED_UPDATE_KEY, version);
       localStorage.setItem(DISMISSED_UPDATE_TIME_KEY, String(Date.now()));
     } catch (_) {}
@@ -3038,10 +3046,46 @@
 
     currentOtaUpdate = updateInfo;
     otaStatus = 'available';
-    if (otaVersion) otaVersion.textContent = `v${updateInfo.latestVersion}`;
+
+    // 1. Populate New Version
+    if (otaVersion) {
+      const cleanLatest = String(updateInfo.latestVersion || '').replace(/^v/i, '');
+      otaVersion.textContent = `v${cleanLatest}`;
+    }
+
+    // 2. Populate Current Version
+    if (otaCurrentVersion) {
+      const cleanCur = String(updateInfo.currentVersion || '').replace(/^v/i, '');
+      if (cleanCur) {
+        otaCurrentVersion.textContent = `v${cleanCur}`;
+      } else if (window.edgeLightAPI?.getAppVersion) {
+        window.edgeLightAPI.getAppVersion().then(v => {
+          if (v && otaCurrentVersion) otaCurrentVersion.textContent = `v${String(v).replace(/^v/i, '')}`;
+        }).catch(() => {});
+      }
+    }
+
+    // 3. Populate Short Update Message
+    if (otaMessage) {
+      if (updateInfo.releaseNotes) {
+        const lines = updateInfo.releaseNotes.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+        const cleanSummary = lines.find(l => !l.startsWith('#') && !l.startsWith('=')) || lines[0] || '';
+        const trimmed = cleanSummary.replace(/^[•\-\*⚡✨]\s*/, '').trim();
+        otaMessage.textContent = trimmed.length > 140 ? (trimmed.slice(0, 137) + '...') : (trimmed || 'A new update is available with performance improvements and updates.');
+      } else {
+        otaMessage.textContent = 'A new update is available with performance improvements and updates.';
+      }
+    }
+
     if (otaActionBtn) {
       otaActionBtn.textContent = 'Update Now';
       otaActionBtn.classList.remove('downloading');
+    }
+    if (otaRemindBtn) {
+      otaRemindBtn.classList.remove('hidden');
+    }
+    if (otaCloseBtn) {
+      otaCloseBtn.classList.remove('hidden');
     }
     if (otaProgressBox) otaProgressBox.classList.add('hidden');
     otaBanner.classList.add('visible');

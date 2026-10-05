@@ -128,6 +128,24 @@ it('updater.js installUpdate() launches silent NSIS setup and automatically rela
   assert(updaterCode.includes('start ""'), 'Must spawn restart command for Edge Light');
 });
 
+// 11. New Update Available Popup Elements Specification Verification
+it('Popup clearly shows: New Update Available, Current version, New version, Short message, Update Now, Later', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../application/src/index.html'), 'utf8');
+  assert(html.includes('New Update Available'), 'Popup missing "New Update Available" header');
+  assert(html.includes('id="ota-current-version"'), 'Popup missing #ota-current-version element');
+  assert(html.includes('id="ota-version"'), 'Popup missing #ota-version element');
+  assert(html.includes('id="ota-message"'), 'Popup missing #ota-message element');
+  assert(html.includes('Update Now'), 'Popup missing "Update Now" button');
+  assert(html.includes('>Later</button>'), 'Popup missing "Later" button');
+});
+
+// 12. Session Duplicate Prevention
+it('renderer.js enforces duplicate prevention during same session via sessionStorage', () => {
+  const rendererCode = fs.readFileSync(path.join(__dirname, '../application/src/renderer.js'), 'utf8');
+  assert(rendererCode.includes('sessionStorage.getItem(\'edgelight_dismissed_\''), 'Missing session dismissal check');
+  assert(rendererCode.includes('sessionStorage.setItem(\'edgelight_dismissed_\''), 'Missing session dismissal write');
+});
+
 (async () => {
   let passed = 0;
   let failed = 0;
