@@ -37,7 +37,7 @@ async function runTests() {
   assert(htmlContent.includes('id="wizardStep1"') && htmlContent.includes('id="wizardStep2"') && htmlContent.includes('id="wizardStep3"') && htmlContent.includes('id="wizardStep4"'), 'All 4 wizard step panes exist in index.html');
   assert(htmlContent.includes('id="razorpayDirectBtn"'), 'Razorpay direct buying button exists');
   assert(htmlContent.includes('id="upiQrImg"'), 'UPI QR code image element exists');
-  assert(htmlContent.includes('id="openPlansFromLicenseBtn"'), 'Upgrade / View Plans button exists in license modal');
+  assert(htmlContent.includes('id="licenseQuickPayBtn"'), 'Instant Razorpay pay button exists in license modal');
   assert(htmlContent.includes('data-plan-id="monthly"') && htmlContent.includes('data-plan-id="quarterly"') && htmlContent.includes('data-plan-id="lifetime"'), 'Plan cards for all 3 sub-₹100 tiers exist');
 
   // 3. Test preload.js bridge

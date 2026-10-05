@@ -740,18 +740,23 @@ input[type="range"]:focus-visible,
   gap: 12px;
 }
 
-.license-col-status #openPlansFromLicenseBtn {
-  margin-top: auto;
-}
-
 .license-col-payment {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   background: rgba(0, 0, 0, 0.28);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 14px;
-  padding: 14px 16px;
+  padding: 16px 18px;
+}
+
+#licenseQuickPayBtn {
+  width: 100%;
+  padding: 12px 18px;
+  font-size: 14px;
+  font-weight: 700;
+  border-radius: 12px;
+  letter-spacing: 0.01em;
 }
 
 @media (max-width: 700px) {
