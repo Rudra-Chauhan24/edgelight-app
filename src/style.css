@@ -583,18 +583,40 @@ input[type="range"]:focus-visible,
 
 /* Version badge — shown in the dock bar */
 .version-badge {
-  color: rgba(255, 255, 255, 0.32);
+  color: rgba(255, 255, 255, 0.4);
   font-size: 10px;
   font-weight: 500;
   letter-spacing: 0.04em;
   white-space: nowrap;
   padding: 2px 7px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.05);
   flex-shrink: 0;
-  pointer-events: none;
+  pointer-events: auto !important;
+  cursor: pointer;
   user-select: none;
+  transition: all 0.2s ease;
+}
+
+.version-badge:hover {
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.version-badge.has-update {
+  color: #ffb266 !important;
+  border-color: rgba(255, 178, 102, 0.65) !important;
+  background: rgba(255, 178, 102, 0.18) !important;
+  font-weight: 700 !important;
+  box-shadow: 0 0 10px rgba(255, 152, 0, 0.35);
+  animation: pulse-update-badge 2s infinite ease-in-out;
+}
+
+@keyframes pulse-update-badge {
+  0%, 100% { transform: scale(1); border-color: rgba(255, 178, 102, 0.65); }
+  50% { transform: scale(1.06); border-color: rgba(255, 178, 102, 0.95); box-shadow: 0 0 14px rgba(255, 152, 0, 0.6); }
 }
 
 /* License badge in dock footer */

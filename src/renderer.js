@@ -2979,13 +2979,17 @@
     versionBadgeEl.title = 'Click to check for updates';
     versionBadgeEl.addEventListener('click', async (e) => {
       e.stopPropagation();
+      if (currentOtaUpdate && currentOtaUpdate.updateAvailable) {
+        showOtaBanner({ ...currentOtaUpdate, isManualCheck: true });
+        return;
+      }
       showStatus('🔍 Checking for updates...', 2500);
       try {
         if (window.edgeLightAPI?.checkForUpdates) {
           const res = await window.edgeLightAPI.checkForUpdates();
           if (res && res.updateAvailable) {
-            showOtaBanner(res);
-            showStatus(`✨ Update v${res.latestVersion} available! Click Update Now above.`, 4000);
+            showOtaBanner({ ...res, isManualCheck: true });
+            showStatus(`✨ Update v${res.latestVersion} available!`, 3500);
           } else {
             showStatus(`✓ Edge Light is up to date (${versionBadgeEl.textContent})`, 3000);
           }
@@ -3001,16 +3005,16 @@
   let otaStatus = 'available'; // 'available' | 'downloading' | 'ready'
   const DISMISSED_UPDATE_KEY = 'edgelight_dismissed_update_version';
   const DISMISSED_UPDATE_TIME_KEY = 'edgelight_dismissed_update_time';
-  const REMIND_LATER_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+  // Clear any legacy localStorage locks so startup update prompt is never suppressed
+  try {
+    localStorage.removeItem(DISMISSED_UPDATE_KEY);
+    localStorage.removeItem(DISMISSED_UPDATE_TIME_KEY);
+  } catch (_) {}
 
   function isUpdateDismissed(version) {
     try {
       if (sessionStorage.getItem('edgelight_dismissed_' + version) === 'true') {
-        return true;
-      }
-      const dismissedVer = localStorage.getItem(DISMISSED_UPDATE_KEY);
-      const dismissedTime = parseInt(localStorage.getItem(DISMISSED_UPDATE_TIME_KEY), 10) || 0;
-      if (dismissedVer === version && (Date.now() - dismissedTime < REMIND_LATER_INTERVAL_MS)) {
         return true;
       }
     } catch (_) {}
@@ -3020,8 +3024,8 @@
   function markUpdateDismissed(version) {
     try {
       sessionStorage.setItem('edgelight_dismissed_' + version, 'true');
-      localStorage.setItem(DISMISSED_UPDATE_KEY, version);
-      localStorage.setItem(DISMISSED_UPDATE_TIME_KEY, String(Date.now()));
+      localStorage.removeItem(DISMISSED_UPDATE_KEY);
+      localStorage.removeItem(DISMISSED_UPDATE_TIME_KEY);
     } catch (_) {}
   }
 
@@ -3038,14 +3042,23 @@
       return;
     }
 
-    // Do not repeatedly show if the user dismissed this specific version recently (unless manually triggered)
+    // Do not repeatedly show if the user dismissed this specific version in this session (unless manually triggered)
     if (!updateInfo.isManualCheck && isUpdateDismissed(updateInfo.latestVersion)) {
-      console.log(`[AppUpdater] Update v${updateInfo.latestVersion} previously dismissed / remind later active.`);
+      console.log(`[AppUpdater] Update v${updateInfo.latestVersion} previously dismissed in session.`);
+      if (versionBadgeEl) {
+        versionBadgeEl.classList.add('has-update');
+        versionBadgeEl.title = `✨ Update v${updateInfo.latestVersion} available! Click to update.`;
+      }
       return;
     }
 
     currentOtaUpdate = updateInfo;
     otaStatus = 'available';
+
+    if (versionBadgeEl && updateInfo.latestVersion) {
+      versionBadgeEl.classList.add('has-update');
+      versionBadgeEl.title = `✨ Update v${updateInfo.latestVersion} available! Click to update.`;
+    }
 
     // 1. Populate New Version
     if (otaVersion) {

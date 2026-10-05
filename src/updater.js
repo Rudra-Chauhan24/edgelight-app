@@ -48,10 +48,10 @@ class AppUpdater {
 
       const req = client.get(url, {
         headers: {
-          'User-Agent': 'EdgeLight-Desktop-Updater/' + (app?.getVersion ? app.getVersion() : '1.0.7'),
+          'User-Agent': 'EdgeLight-Desktop-Updater/' + (app?.getVersion ? app.getVersion() : '1.0.14'),
           'Accept': 'application/json'
         },
-        timeout: 6000
+        timeout: 15000
       }, (res) => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           return resolve(this.fetchJson(res.headers.location, redirectCount + 1));
@@ -84,7 +84,7 @@ class AppUpdater {
     return new Promise((resolve, reject) => {
       const req = https.get('https://github.com/Rudra-Chauhan24/edgelight-app/releases/latest', {
         headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
-        timeout: 6000
+        timeout: 15000
       }, (res) => {
         const location = res.headers.location;
         if (location && location.includes('/releases/tag/')) {
@@ -139,10 +139,24 @@ class AppUpdater {
         try {
           manifest = await this.fetchLatestReleaseRedirect();
         } catch (redirErr) {
-          // 3. Tertiary: backend manifest endpoint
+          // 3. Tertiary: Raw GitHub repository manifest fallback
           try {
-            manifest = await this.fetchJson(this.fallbackUrl);
-          } catch (e) {}
+            const rawPkg = await this.fetchJson('https://raw.githubusercontent.com/Rudra-Chauhan24/edgelight-app/main/package.json');
+            if (rawPkg && rawPkg.version) {
+              const rawVer = rawPkg.version.replace(/^v/i, '').trim();
+              manifest = {
+                version: rawVer,
+                releaseDate: new Date().toISOString(),
+                notes: '✨ Edge Light update with performance improvements and stability updates.',
+                downloadUrl: `https://github.com/Rudra-Chauhan24/edgelight-app/releases/download/v${rawVer}/Edge.Light.Setup.${rawVer}.exe`
+              };
+            }
+          } catch (rawErr) {
+            // 4. Quaternary: backend manifest endpoint
+            try {
+              manifest = await this.fetchJson(this.fallbackUrl);
+            } catch (e) {}
+          }
         }
       }
 
