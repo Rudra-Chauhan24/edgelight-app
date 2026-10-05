@@ -43,6 +43,7 @@ contextBridge.exposeInMainWorld('edgeLightAPI', {
   setLaunchAtLogin: (enable) => ipcRenderer.invoke('set-launch-at-login', enable),
   getLicenseInfo: () => ipcRenderer.invoke('get-license-info'),
   refreshLicenseInfo: () => ipcRenderer.invoke('refresh-license-info'),
+  resetTrial: () => ipcRenderer.invoke('reset-trial'),
   copyHWID: () => ipcRenderer.invoke('copy-hwid'),
   getPaymentConfig: () => ipcRenderer.invoke('get-payment-config'),
   createRazorpayPaymentLink: (params) => ipcRenderer.invoke('create-razorpay-link', params),

@@ -14,9 +14,15 @@ app.commandLine.appendSwitch('enable-zero-copy');
 let isOnline = true;
 let lastOnlineTime = Date.now();
 let connectivityCheckInterval = null;
+let isCheckingConnectivity = false;
 
 function checkConnectivity() {
+  if (isCheckingConnectivity) return;
+  isCheckingConnectivity = true;
+  const finishCheck = () => { isCheckingConnectivity = false; };
+
   const req = https.get('https://firestore.googleapis.com', { timeout: 4000 }, (res) => {
+    finishCheck();
     const wasOffline = !isOnline;
     isOnline = true;
     lastOnlineTime = Date.now();
@@ -36,6 +42,7 @@ function checkConnectivity() {
     res.resume();
   });
   req.on('error', () => {
+    finishCheck();
     const wasOnline = isOnline;
     isOnline = false;
     if (wasOnline && mainWindow && !mainWindow.isDestroyed()) {
@@ -48,7 +55,10 @@ function checkConnectivity() {
       mainWindow.webContents.send('offline-duration-update', offlineHours);
     }
   });
-  req.on('timeout', () => req.destroy());
+  req.on('timeout', () => {
+    finishCheck();
+    req.destroy();
+  });
   req.end();
 }
 
@@ -98,10 +108,21 @@ function updateTrayMenu(isOn, controlsShown = isControlsVisible) {
   else if (licStatus === 'rejected') licLabel = '🚫 License: Rejected';
   else if (licStatus === 'expired') licLabel = '⌛ Trial Expired';
   else if (licStatus === 'clock_tampered') licLabel = '⚠️ Tampering Detected';
-  else if (currentLicenseStatus?.trialRemainingHours !== undefined) {
-    const days = currentLicenseStatus.trialRemainingDays;
-    const hours = currentLicenseStatus.trialRemainingHours % 24;
-    licLabel = `Trial: ${days > 0 ? days + 'd ' : ''}${hours}h remaining`;
+  else if (currentLicenseStatus?.trialExpiresAt || currentLicenseStatus?.trialRemainingHours !== undefined) {
+    const expiresAt = currentLicenseStatus?.trialExpiresAt || (Date.now() + (currentLicenseStatus?.trialRemainingHours || 72) * 3600000);
+    const remMs = Math.max(0, expiresAt - Date.now());
+    const days = Math.floor(remMs / 86400000);
+    const hours = Math.floor((remMs % 86400000) / 3600000);
+    const mins = Math.floor((remMs % 3600000) / 60000);
+    if (remMs <= 0) {
+      licLabel = '⌛ Trial Expired';
+    } else if (days > 0) {
+      licLabel = `Trial: ${days}d ${hours}h remaining`;
+    } else if (hours > 0) {
+      licLabel = `Trial: ${hours}h ${mins}m remaining`;
+    } else {
+      licLabel = `Trial: ${mins}m remaining`;
+    }
   }
 
   try {
@@ -315,6 +336,51 @@ function stopKeepTop() {
   }
 }
 
+// OS-level cursor tracking loop for rock-solid cursor hole cutout (even when window is unfocused/startup)
+let lastCursorX = -9999;
+let lastCursorY = -9999;
+let cursorTrackerInterval = null;
+
+function startCursorTracker() {
+  if (cursorTrackerInterval) return;
+  cursorTrackerInterval = setInterval(() => {
+    if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible()) return;
+    if (!currentLightState) return;
+    try {
+      const pt = screen.getCursorScreenPoint();
+      if (Math.abs(pt.x - lastCursorX) >= 2 || Math.abs(pt.y - lastCursorY) >= 2) {
+        lastCursorX = pt.x;
+        lastCursorY = pt.y;
+        const bounds = mainWindow.getBounds();
+        const relX = pt.x - bounds.x;
+        const relY = pt.y - bounds.y;
+        mainWindow.webContents.send('cursor-position', { x: relX, y: relY });
+      }
+    } catch (e) {}
+  }, 25);
+}
+
+function stopCursorTracker() {
+  if (cursorTrackerInterval) {
+    clearInterval(cursorTrackerInterval);
+    cursorTrackerInterval = null;
+  }
+}
+
+let otaInterval = null;
+let otaStartupTimeout = null;
+
+function stopOtaInterval() {
+  if (otaInterval) {
+    clearInterval(otaInterval);
+    otaInterval = null;
+  }
+  if (otaStartupTimeout) {
+    clearTimeout(otaStartupTimeout);
+    otaStartupTimeout = null;
+  }
+}
+
 function createWindow() {
   const primaryDisplay = screen.getPrimaryDisplay();
   const { x, y, width, height } = primaryDisplay.bounds;
@@ -365,30 +431,6 @@ function createWindow() {
   // Initial mouse events ignore mode (clicks pass through transparent areas)
   mainWindow.setIgnoreMouseEvents(true, { forward: true });
 
-  // OS-level cursor tracking loop for rock-solid cursor hole cutout (even when window is unfocused/startup)
-  let lastCursorX = -9999;
-  let lastCursorY = -9999;
-  let cursorTrackerInterval = null;
-
-  function startCursorTracker() {
-    if (cursorTrackerInterval) return;
-    cursorTrackerInterval = setInterval(() => {
-      if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible()) return;
-      if (!currentLightState) return;
-      try {
-        const pt = screen.getCursorScreenPoint();
-        if (Math.abs(pt.x - lastCursorX) >= 2 || Math.abs(pt.y - lastCursorY) >= 2) {
-          lastCursorX = pt.x;
-          lastCursorY = pt.y;
-          const bounds = mainWindow.getBounds();
-          const relX = pt.x - bounds.x;
-          const relY = pt.y - bounds.y;
-          mainWindow.webContents.send('cursor-position', { x: relX, y: relY });
-        }
-      } catch (e) {}
-    }, 25);
-  }
-
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
 
   mainWindow.once('ready-to-show', () => {
@@ -404,7 +446,8 @@ function createWindow() {
     } catch (e) {}
 
     // Check for OTA updates 3.5s after launch
-    setTimeout(async () => {
+    stopOtaInterval();
+    otaStartupTimeout = setTimeout(async () => {
       try {
         const update = await appUpdater.checkForUpdates();
         if (update && update.updateAvailable && mainWindow && !mainWindow.isDestroyed()) {
@@ -414,7 +457,7 @@ function createWindow() {
     }, 3500);
 
     // Periodic OTA update check every 15 minutes while running
-    setInterval(async () => {
+    otaInterval = setInterval(async () => {
       try {
         const update = await appUpdater.checkForUpdates();
         if (update && update.updateAvailable && mainWindow && !mainWindow.isDestroyed()) {
@@ -442,6 +485,8 @@ function createWindow() {
     screen.removeListener('display-added', handleDisplayChange);
     screen.removeListener('display-removed', handleDisplayChange);
     stopKeepTop();
+    stopCursorTracker();
+    stopOtaInterval();
     mainWindow = null;
   });
 }
@@ -491,6 +536,16 @@ ipcMain.handle('refresh-license-info', async () => {
 
 ipcMain.handle('get-payment-config', () => {
   return licenseManager.getPaymentConfig();
+});
+
+ipcMain.handle('reset-trial', async () => {
+  const updated = await licenseManager.resetTrial();
+  currentLicenseStatus = updated;
+  updateTrayMenu(currentLightState);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('license-status-changed', updated);
+  }
+  return updated;
 });
 
 ipcMain.handle('open-external', async (event, url) => {
@@ -1048,6 +1103,8 @@ app.whenReady().then(async () => {
 app.on('will-quit', () => {
   licenseManager.stop();
   stopKeepTop();
+  stopCursorTracker();
+  stopOtaInterval();
   stopWebcamMonitoring();
   stopConnectivityMonitor();
   globalShortcut.unregisterAll();

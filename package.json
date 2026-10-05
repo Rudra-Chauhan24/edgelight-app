@@ -1,6 +1,6 @@
 {
   "name": "edgelight",
-  "version": "1.0.14",
+  "version": "1.0.15",
   "description": "Windows edge-light ring illumination overlay for video calls",
   "main": "src/main.js",
   "author": "EdgeLight Team",
@@ -10,7 +10,8 @@
     "start": "electron .",
     "pack": "npm run generate-icons && electron-builder --dir",
     "dist": "npm run generate-icons && electron-builder",
-    "dist:portable": "npm run generate-icons && electron-builder --win portable"
+    "dist:portable": "npm run generate-icons && electron-builder --win portable",
+    "stats": "node scripts/get-device-stats.js"
   },
   "build": {
     "appId": "com.edgelight.desktop",

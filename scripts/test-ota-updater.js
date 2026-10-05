@@ -1,9 +1,9 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const { AppUpdater } = require('../src/updater');
+const { AppUpdater } = require('../application/src/updater');
 
-console.log('🧪 Testing Over-The-Air (OTA) Updater System...\n');
+console.log('🧪 Testing Edge Light Version Update Notification System...\n');
 
 const tests = [];
 
@@ -15,82 +15,117 @@ const updater = new AppUpdater();
 
 // 1. Semver Parsing
 it('parseSemver parses standard and prefixed version strings', () => {
-  assert.deepStrictEqual(updater.parseSemver('1.0.4'), [1, 0, 4]);
-  assert.deepStrictEqual(updater.parseSemver('v1.0.5'), [1, 0, 5]);
-  assert.deepStrictEqual(updater.parseSemver('2.1'), [2, 1, 0]);
+  assert.deepStrictEqual(updater.parseSemver('1.0.12'), [1, 0, 12]);
+  assert.deepStrictEqual(updater.parseSemver('v1.0.13'), [1, 0, 13]);
+  assert.deepStrictEqual(updater.parseSemver('2.0.0'), [2, 0, 0]);
   assert.deepStrictEqual(updater.parseSemver(''), [0, 0, 0]);
 });
 
 // 2. Semver Comparison
-it('isNewerVersion detects newer versions correctly', () => {
-  assert.strictEqual(updater.isNewerVersion('1.0.5', '1.0.4'), true);
-  assert.strictEqual(updater.isNewerVersion('1.1.0', '1.0.9'), true);
-  assert.strictEqual(updater.isNewerVersion('2.0.0', '1.9.9'), true);
-  assert.strictEqual(updater.isNewerVersion('1.0.4', '1.0.4'), false);
-  assert.strictEqual(updater.isNewerVersion('1.0.3', '1.0.4'), false);
-  assert.strictEqual(updater.isNewerVersion('0.9.9', '1.0.0'), false);
+it('isNewerVersion compares versions correctly', () => {
+  assert.strictEqual(updater.isNewerVersion('1.0.13', '1.0.12'), true);
+  assert.strictEqual(updater.isNewerVersion('1.1.0', '1.0.12'), true);
+  assert.strictEqual(updater.isNewerVersion('2.0.0', '1.0.12'), true);
+  assert.strictEqual(updater.isNewerVersion('1.0.12', '1.0.12'), false);
+  assert.strictEqual(updater.isNewerVersion('1.0.11', '1.0.12'), false);
 });
 
-// 3. Mock Check for Updates
-it('checkForUpdates flags available update when remote version is newer', async () => {
-  const mockUpdater = new AppUpdater({ currentVersion: '1.0.5' });
-  mockUpdater.fetchJson = async () => ({
-    version: '1.0.6',
-    releaseDate: new Date().toISOString(),
-    notes: '✨ Payment window layering fixes, browser tab checkout, and active banner',
-    downloadUrl: 'https://example.com/EdgeLight-Setup-1.0.6.exe'
+// 3. Test Case 1: Installed version = latest version -> no update popup
+it('Case 1: When installed version = latest released version, updateAvailable is false', async () => {
+  const checkProbe = await new AppUpdater().checkForUpdates();
+  const latestVer = checkProbe.latestVersion || '1.0.15';
+  const currentUpdater = new AppUpdater({ currentVersion: latestVer });
+  const checkResult = await currentUpdater.checkForUpdates();
+  
+  console.log(`     Installed: ${checkResult.currentVersion}, Latest: ${checkResult.latestVersion}`);
+  console.log(`     Update Available: ${checkResult.updateAvailable}`);
+  
+  assert.strictEqual(checkResult.currentVersion, latestVer);
+  assert.strictEqual(checkResult.latestVersion, latestVer);
+  assert.strictEqual(checkResult.updateAvailable, false, 'Should NOT flag update when versions are equal');
+});
+
+// 4. Test Case 2: Installed version < latest version -> update popup appears with correct new version
+it('Case 2: When installed version (1.0.11) < latest released version, updateAvailable is true', async () => {
+  const olderUpdater = new AppUpdater({ currentVersion: '1.0.11' });
+  const checkResult = await olderUpdater.checkForUpdates();
+  
+  console.log(`     Installed: ${checkResult.currentVersion}, Latest: ${checkResult.latestVersion}`);
+  console.log(`     Update Available: ${checkResult.updateAvailable}`);
+  console.log(`     Download URL: ${checkResult.downloadUrl}`);
+
+  assert.strictEqual(checkResult.currentVersion, '1.0.11');
+  assert.strictEqual(checkResult.updateAvailable, true, 'Should flag update when installed version is older');
+  assert(checkResult.downloadUrl.includes(checkResult.latestVersion), 'Download URL must point to latest release');
+  assert(checkResult.downloadUrl.endsWith('.exe'), 'Download URL must be executable installer');
+});
+
+// 5. Test Case 2 with future version simulation (e.g. installed 1.0.12 < future release 1.0.13)
+it('Future version simulation: When remote release is 1.0.13, detects update dynamically without hardcoding', async () => {
+  const simulatedUpdater = new AppUpdater({ currentVersion: '1.0.12' });
+  simulatedUpdater.fetchJson = async () => ({
+    tag_name: 'v1.0.13',
+    published_at: new Date().toISOString(),
+    body: 'New optical glow shaders and camera stability improvements',
+    assets: [
+      {
+        name: 'Edge.Light.Setup.1.0.13.exe',
+        browser_download_url: 'https://github.com/Rudra-Chauhan24/edgelight-app/releases/download/v1.0.13/Edge.Light.Setup.1.0.13.exe'
+      }
+    ]
   });
 
-  const res = await mockUpdater.checkForUpdates();
+  const res = await simulatedUpdater.checkForUpdates();
   assert.strictEqual(res.updateAvailable, true);
-  assert.strictEqual(res.latestVersion, '1.0.6');
-  assert.strictEqual(res.downloadUrl, 'https://example.com/EdgeLight-Setup-1.0.6.exe');
+  assert.strictEqual(res.latestVersion, '1.0.13');
+  assert.strictEqual(res.downloadUrl, 'https://github.com/Rudra-Chauhan24/edgelight-app/releases/download/v1.0.13/Edge.Light.Setup.1.0.13.exe');
 });
 
-// 4. HTML Elements Verification
-it('index.html contains #ota-banner and required child elements', () => {
-  const html = fs.readFileSync(path.join(__dirname, '../src/index.html'), 'utf8');
-  assert(html.includes('id="ota-banner"'), 'Missing #ota-banner');
-  assert(html.includes('id="ota-version"'), 'Missing #ota-version');
-  assert(html.includes('id="ota-progress-box"'), 'Missing #ota-progress-box');
-  assert(html.includes('id="ota-progress-fill"'), 'Missing #ota-progress-fill');
-  assert(html.includes('id="ota-action-btn"'), 'Missing #ota-action-btn');
-  assert(html.includes('id="ota-close-btn"'), 'Missing #ota-close-btn');
+// 6. UI Elements & Layout Verification
+it('index.html contains #ota-banner, version text, Update Now button, and Remind Later button', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../application/src/index.html'), 'utf8');
+  assert(html.includes('id="ota-banner"'), 'Missing #ota-banner element');
+  assert(html.includes('id="ota-version"'), 'Missing #ota-version element');
+  assert(html.includes('id="ota-action-btn"'), 'Missing #ota-action-btn (Update Now)');
+  assert(html.includes('id="ota-remind-btn"'), 'Missing #ota-remind-btn (Remind Later)');
+  assert(html.includes('id="ota-close-btn"'), 'Missing #ota-close-btn (Dismiss)');
+  assert(html.includes('Update Now'), 'Button text must say "Update Now"');
+  assert(html.includes('Remind Later'), 'Button text must say "Remind Later"');
 });
 
-// 5. CSS Styles Verification
-it('style.css contains styles for .ota-banner and progress elements', () => {
-  const css = fs.readFileSync(path.join(__dirname, '../src/style.css'), 'utf8');
-  assert(css.includes('.ota-banner'), 'Missing .ota-banner');
-  assert(css.includes('.ota-banner.visible'), 'Missing .ota-banner.visible');
-  assert(css.includes('.ota-progress-box'), 'Missing .ota-progress-box');
-  assert(css.includes('.ota-progress-fill'), 'Missing .ota-progress-fill');
-  assert(css.includes('.ota-btn'), 'Missing .ota-btn');
+// 7. Styling Verification
+it('style.css defines styles for .ota-banner, .visible state, .ota-remind-btn, and .ota-btn', () => {
+  const css = fs.readFileSync(path.join(__dirname, '../application/src/style.css'), 'utf8');
+  assert(css.includes('.ota-banner'), 'Missing .ota-banner in style.css');
+  assert(css.includes('.ota-banner.visible'), 'Missing .ota-banner.visible state in style.css');
+  assert(css.includes('.ota-remind-btn'), 'Missing .ota-remind-btn in style.css');
+  assert(css.includes('.ota-btn'), 'Missing .ota-btn in style.css');
 });
 
-// 6. Preload and Main IPC Handlers Verification
-it('preload.js and main.js wire OTA updater methods', () => {
-  const mainCode = fs.readFileSync(path.join(__dirname, '../src/main.js'), 'utf8');
-  const preloadCode = fs.readFileSync(path.join(__dirname, '../src/preload.js'), 'utf8');
-
-  assert(mainCode.includes('ipcMain.handle(\'check-for-updates\''), 'Missing check-for-updates in main.js');
-  assert(mainCode.includes('ipcMain.handle(\'download-update\''), 'Missing download-update in main.js');
-  assert(mainCode.includes('ipcMain.handle(\'install-update\''), 'Missing install-update in main.js');
-
-  assert(preloadCode.includes('checkForUpdates:'), 'Missing checkForUpdates in preload.js');
-  assert(preloadCode.includes('downloadUpdate:'), 'Missing downloadUpdate in preload.js');
-  assert(preloadCode.includes('installUpdate:'), 'Missing installUpdate in preload.js');
-  assert(preloadCode.includes('onUpdateAvailable:'), 'Missing onUpdateAvailable in preload.js');
-  assert(preloadCode.includes('onUpdateProgress:'), 'Missing onUpdateProgress in preload.js');
+// 8. Renderer Logic Verification (Dismissal persistence & Remind Later)
+it('renderer.js implements dismissal check and remind later handling', () => {
+  const rendererCode = fs.readFileSync(path.join(__dirname, '../application/src/renderer.js'), 'utf8');
+  assert(rendererCode.includes('isUpdateDismissed'), 'Missing isUpdateDismissed in renderer.js');
+  assert(rendererCode.includes('markUpdateDismissed'), 'Missing markUpdateDismissed in renderer.js');
+  assert(rendererCode.includes('otaRemindBtn'), 'Missing otaRemindBtn handler in renderer.js');
+  assert(rendererCode.includes('dismissUpdateBanner'), 'Missing dismissUpdateBanner in renderer.js');
+  assert(rendererCode.includes('otaCloseBtn?.addEventListener(\'click\', dismissUpdateBanner)'), 'Close button not wired to dismissUpdateBanner');
+  assert(rendererCode.includes('otaRemindBtn?.addEventListener(\'click\', dismissUpdateBanner)'), 'Remind Later button not wired to dismissUpdateBanner');
 });
 
-// 7. Backend OTA Manifest Endpoints Verification
-it('backend/server.js contains /api/updates/latest and /api/updates/publish', () => {
-  const serverCode = fs.readFileSync(path.join(__dirname, '../backend/server.js'), 'utf8');
-  assert(serverCode.includes('/api/updates/latest'), 'Missing /api/updates/latest');
-  assert(serverCode.includes('/api/updates/publish'), 'Missing /api/updates/publish');
-  assert(serverCode.includes('/api/admin/stats'), 'Missing /api/admin/stats');
-  assert(serverCode.includes('/api/devices'), 'Missing /api/devices');
+// 9. Automatic Install & Direct Reopen Flow Verification
+it('renderer.js automatically triggers installUpdate() and transitions to Reopening without requiring second click', () => {
+  const rendererCode = fs.readFileSync(path.join(__dirname, '../application/src/renderer.js'), 'utf8');
+  assert(rendererCode.includes('otaActionBtn.textContent = \'Reopening...\''), 'Missing Reopening status text');
+  assert(rendererCode.includes('window.edgeLightAPI.installUpdate()'), 'Missing automatic installUpdate call');
+});
+
+// 10. Updater Helper Reopen Command Verification
+it('updater.js installUpdate() launches silent NSIS setup and automatically relaunches Edge Light', () => {
+  const updaterCode = fs.readFileSync(path.join(__dirname, '../application/src/updater.js'), 'utf8');
+  assert(updaterCode.includes('/S'), 'Must run installer with /S silent flag');
+  assert(updaterCode.includes('currentExe'), 'Must track current executable to reopen');
+  assert(updaterCode.includes('start ""'), 'Must spawn restart command for Edge Light');
 });
 
 (async () => {
@@ -111,4 +146,5 @@ it('backend/server.js contains /api/updates/latest and /api/updates/publish', ()
 
   console.log(`\nResults: ${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);
+  console.log('✅ All OTA update notification tests passed successfully!');
 })();

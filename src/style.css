@@ -50,12 +50,12 @@ canvas#light {
   transform: translateZ(0);
 }
 
-/* Status badge near screen bottom */
+/* Status badge near screen top (upward side) */
 #status {
   position: fixed;
-  bottom: 24px;
+  top: 24px;
   left: 50%;
-  transform: translateX(-50%) translateY(12px) scale(0.92);
+  transform: translateX(-50%) translateY(-14px) scale(0.92);
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 500;
@@ -2407,7 +2407,7 @@ input[type="range"]:focus-visible,
 /* ── FLOATING NON-BLOCKING PAYMENT STATUS PILL ───────────────────── */
 .payment-status-pill {
   position: fixed;
-  bottom: 26px;
+  top: 26px;
   left: 50%;
   transform: translateX(-50%) translateY(0);
   z-index: 50000;
@@ -2426,15 +2426,15 @@ input[type="range"]:focus-visible,
   opacity: 1;
   transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   max-width: 90vw;
-  animation: slideUpPill 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: slideDownPill 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .payment-status-pill.hidden {
   display: none !important;
 }
 
-@keyframes slideUpPill {
-  from { opacity: 0; transform: translateX(-50%) translateY(20px); }
+@keyframes slideDownPill {
+  from { opacity: 0; transform: translateX(-50%) translateY(-20px); }
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 

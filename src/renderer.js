@@ -839,17 +839,21 @@
     const licModal = licenseModal || document.getElementById('license-modal');
     const wizModal = wizardModal || document.getElementById('setup-wizard-modal');
     const successOverlay = document.getElementById('payment-success-overlay');
+    const verifyOverlay = document.getElementById('payment-verification-overlay');
+    const offlineLockOverlay = document.getElementById('offline-lock-overlay');
     const ota = otaBanner || document.getElementById('ota-banner');
     return Boolean(
       (licModal && licModal.classList.contains('visible')) ||
       (wizModal && wizModal.classList.contains('visible')) ||
       Boolean(successOverlay) ||
+      Boolean(verifyOverlay) ||
+      Boolean(offlineLockOverlay) ||
       (ota && ota.classList.contains('visible'))
     );
   }
 
   function setClickThrough(enableClickThrough) {
-    if (enableClickThrough && isAnyModalOpen() && !isPaymentSessionOpen) {
+    if (enableClickThrough && (isAnyModalOpen() || isPaymentSessionOpen)) {
       enableClickThrough = false;
     }
     if (clickThroughState === enableClickThrough) return;
@@ -1056,7 +1060,19 @@
       );
     }
 
-    if (isInsideBar || isInsideOta || isPointerDown) {
+    const pspEl = paymentStatusPill || document.getElementById('payment-status-pill');
+    let isInsidePsp = false;
+    if (pspEl && !pspEl.classList.contains('hidden')) {
+      const pspRect = pspEl.getBoundingClientRect();
+      isInsidePsp = (
+        e.clientX >= pspRect.left &&
+        e.clientX <= pspRect.right &&
+        e.clientY >= pspRect.top &&
+        e.clientY <= pspRect.bottom
+      );
+    }
+
+    if (isInsideBar || isInsideOta || isInsidePsp || isPointerDown) {
       isInteractingWithDock = true;
       clearTimeout(idleTimer);
       setClickThrough(false);
@@ -1613,6 +1629,96 @@
   // Ensure default click-through mode is engaged (dock hidden by default)
   setClickThrough(true);
 
+  // ── REAL-TIME TRIAL COUNTDOWN ENGINE ──────────────────────────────
+  let trialCountdownTimer = null;
+
+  function formatTrialRemaining(remainingMs) {
+    if (remainingMs <= 0) {
+      return { badge: 'Expired', modal: '⌛ 3-Day Free Trial Expired', expired: true };
+    }
+    const totalSecs = Math.floor(remainingMs / 1000);
+    const totalMins = Math.floor(totalSecs / 60);
+    const totalHours = Math.floor(totalMins / 60);
+    const days = Math.floor(totalHours / 24);
+    const hours = totalHours % 24;
+    const mins = totalMins % 60;
+    const secs = totalSecs % 60;
+
+    let badgeText = '';
+    let modalText = '';
+
+    if (days > 0) {
+      badgeText = hours > 0 ? `Trial: ${days}d ${hours}h` : `Trial: ${days}d`;
+      modalText = `⏳ Free Trial Active (${days}d ${hours}h left)`;
+    } else if (hours > 0) {
+      badgeText = `Trial: ${hours}h ${mins}m`;
+      modalText = `⏳ Free Trial Active (${hours}h ${mins}m left)`;
+    } else if (mins > 0) {
+      badgeText = `Trial: ${mins}m ${secs}s`;
+      modalText = `⏳ Free Trial Active (${mins}m ${secs}s left)`;
+    } else {
+      badgeText = `Trial: ${secs}s`;
+      modalText = `⏳ Free Trial Active (${secs}s left)`;
+    }
+
+    return { badge: badgeText, modal: modalText, expired: false, days, hours, mins, secs, totalHours };
+  }
+
+  function tickTrialCountdown() {
+    if (licenseState.status !== 'trial') {
+      stopTrialCountdown();
+      return;
+    }
+    if (!licenseState.trialExpiresAt) {
+      if (licenseState.trialRemainingHours) {
+        licenseState.trialExpiresAt = Date.now() + (licenseState.trialRemainingHours * 3600 * 1000);
+      } else {
+        return;
+      }
+    }
+
+    const remainingMs = Math.max(0, licenseState.trialExpiresAt - Date.now());
+    const formatted = formatTrialRemaining(remainingMs);
+
+    if (licenseBadge) {
+      if (formatted.expired) {
+        licenseBadge.className = 'license-badge expired';
+        licenseBadge.textContent = 'Expired';
+        licenseBadge.title = 'Free Trial Expired — Activation Required';
+        licenseState.status = 'expired';
+        licenseState.isAuthorized = false;
+        if (state.on) setOn(false);
+      } else {
+        licenseBadge.className = 'license-badge';
+        licenseBadge.textContent = formatted.badge;
+        licenseBadge.title = `3-Day Free Trial: ${formatted.badge} remaining`;
+      }
+    }
+
+    if (modalStatusBadge) {
+      if (formatted.expired) {
+        modalStatusBadge.className = 'license-status-badge expired';
+        modalStatusBadge.textContent = '⌛ 3-Day Free Trial Expired';
+      } else {
+        modalStatusBadge.className = 'license-status-badge';
+        modalStatusBadge.textContent = formatted.modal;
+      }
+    }
+  }
+
+  function startTrialCountdown() {
+    if (trialCountdownTimer) clearInterval(trialCountdownTimer);
+    tickTrialCountdown();
+    trialCountdownTimer = setInterval(tickTrialCountdown, 1000);
+  }
+
+  function stopTrialCountdown() {
+    if (trialCountdownTimer) {
+      clearInterval(trialCountdownTimer);
+      trialCountdownTimer = null;
+    }
+  }
+
   // ── LICENSE & HWID MODAL MANAGEMENT ──────────────────────────────
   function updateLicenseUI(info) {
     if (!info) return;
@@ -1625,26 +1731,32 @@
     if (licenseBadge) {
       licenseBadge.className = 'license-badge';
       if (info.status === 'approved') {
+        stopTrialCountdown();
         licenseBadge.textContent = '✓ Pro';
         licenseBadge.classList.add('licensed');
         licenseBadge.title = 'Commercial Lifetime License Active';
       } else if (info.status === 'rejected') {
+        stopTrialCountdown();
         licenseBadge.textContent = 'Blocked';
         licenseBadge.classList.add('rejected');
         licenseBadge.title = 'Device access revoked by administrator';
       } else if (info.status === 'offline_locked') {
+        stopTrialCountdown();
         licenseBadge.textContent = '📡 Offline';
         licenseBadge.classList.add('expired');
         licenseBadge.title = 'Connect to internet to verify license';
       } else if (info.status === 'expired' || info.status === 'clock_tampered') {
+        stopTrialCountdown();
         licenseBadge.textContent = 'Expired';
         licenseBadge.classList.add('expired');
         licenseBadge.title = 'Free Trial Expired — Activation Required';
+      } else if (info.status === 'evaluating') {
+        stopTrialCountdown();
+        licenseBadge.textContent = 'Trial: 3d';
+        licenseBadge.title = 'Verifying trial license status…';
       } else {
-        const days = info.trialRemainingDays;
-        const hours = info.trialRemainingHours % 24;
-        licenseBadge.textContent = `Trial: ${days > 0 ? days + 'd' : hours + 'h'}`;
-        licenseBadge.title = `3-Day Free Trial: ${info.trialRemainingHours}h remaining`;
+        // Active trial with live real-time countdown
+        startTrialCountdown();
       }
     }
 
@@ -1665,10 +1777,10 @@
       } else if (info.status === 'clock_tampered') {
         modalStatusBadge.textContent = '⚠️ System Clock Tampering Detected';
         modalStatusBadge.classList.add('expired');
+      } else if (info.status === 'evaluating') {
+        modalStatusBadge.textContent = '⏳ Checking License Status…';
       } else {
-        const days = info.trialRemainingDays;
-        const hours = info.trialRemainingHours % 24;
-        modalStatusBadge.textContent = `⏳ Free Trial Active (${days > 0 ? days + 'd ' : ''}${hours}h left)`;
+        tickTrialCountdown();
       }
     }
 
@@ -2153,7 +2265,9 @@
   });
 
   // Manual payment verification helper
+  let isManualActivating = false;
   async function handleManualActivation(inputEl, feedbackEl, planId) {
+    if (isManualActivating) return;
     const val = inputEl?.value?.trim();
     if (!val || val.length < 4) {
       if (feedbackEl) {
@@ -2164,6 +2278,7 @@
       return;
     }
 
+    isManualActivating = true;
     if (feedbackEl) {
       feedbackEl.className = 'mac-feedback';
       feedbackEl.textContent = '⏳ Verifying & activating license…';
@@ -2212,6 +2327,8 @@
         feedbackEl.className = 'mac-feedback error';
         feedbackEl.textContent = 'Verification error: ' + e.message;
       }
+    } finally {
+      isManualActivating = false;
     }
   }
 
@@ -2297,6 +2414,7 @@
   let paymentPollInterval = null;
   let paymentPollTimeout = null;
 
+  let isPaymentPollingActive = false;
   function startPaymentActivationPolling(planId) {
     stopPaymentActivationPolling();
 
@@ -2304,6 +2422,7 @@
     const MAX_POLLS = 180; // 180 × 3.5s = ~10.5 minutes
 
     paymentPollInterval = setInterval(async () => {
+      if (isPaymentPollingActive) return;
       pollCount++;
       if (pollCount > MAX_POLLS) {
         stopPaymentActivationPolling();
@@ -2314,15 +2433,21 @@
         return;
       }
 
+      isPaymentPollingActive = true;
       try {
         if (window.edgeLightAPI?.refreshLicenseInfo) {
           const updated = await window.edgeLightAPI.refreshLicenseInfo();
           if (updated && updated.isAuthorized && updated.status === 'approved') {
+            stopPaymentActivationPolling();
             await endPaymentSession(false);
             showPaymentVerificationModal('verified', updated);
+            return;
           }
         }
-      } catch (e) {}
+      } catch (e) {
+      } finally {
+        isPaymentPollingActive = false;
+      }
     }, 3500);
   }
 
@@ -2467,8 +2592,8 @@
         hideSetupWizard();
         hideLicenseModal();
         completeWizard();
-        if (!isLightingActive) {
-          toggleLight();
+        if (!state.on) {
+          setOn(true);
         }
       });
 
@@ -2729,6 +2854,7 @@
   window.__showSetupWizard = showSetupWizard;
   window.__hideSetupWizard = hideSetupWizard;
   window.__updateLicenseUI = updateLicenseUI;
+  window.__resetTrial = () => window.edgeLightAPI?.resetTrial?.();
 
   // ── OFFLINE LOCK ENFORCEMENT ───────────────────────────────────────
   let offlineLockOverlay = null;
@@ -2839,10 +2965,10 @@
       window.edgeLightAPI.getAppVersion().then((ver) => {
         if (ver) versionBadgeEl.textContent = `v${ver}`;
       }).catch(() => {
-        versionBadgeEl.textContent = 'v1.0.14';
+        versionBadgeEl.textContent = 'v1.0.15';
       });
     } else {
-      versionBadgeEl.textContent = 'v1.0.14';
+      versionBadgeEl.textContent = 'v1.0.15';
     }
 
     versionBadgeEl.style.cursor = 'pointer';
@@ -2893,6 +3019,16 @@
 
   function showOtaBanner(updateInfo) {
     if (!otaBanner || !updateInfo || !updateInfo.updateAvailable) return;
+
+    // Prevent overwriting in-flight download or installation
+    if (otaStatus === 'downloading' || otaStatus === 'reopening' || otaStatus === 'ready') {
+      return;
+    }
+
+    // Do not repeatedly show if the banner is already displayed
+    if (otaBanner.classList.contains('visible') && !updateInfo.isManualCheck) {
+      return;
+    }
 
     // Do not repeatedly show if the user dismissed this specific version recently (unless manually triggered)
     if (!updateInfo.isManualCheck && isUpdateDismissed(updateInfo.latestVersion)) {

@@ -19,10 +19,10 @@ function assert(condition, message) {
 // 1. Verify code structure in src/renderer.js and application/src/renderer.js
 ['../src/renderer.js', '../application/src/renderer.js'].forEach((relPath) => {
   const filePath = path.join(__dirname, relPath);
-  const code = fs.readFileSync(filePath, 'utf8');
+  const code = fs.readFileSync(filePath, 'utf8').replace(/\r\n/g, '\n');
 
   assert(code.includes('function isAnyModalOpen()'), `${relPath} defines isAnyModalOpen()`);
-  assert(code.includes('if (enableClickThrough && isAnyModalOpen())'), `${relPath} guards setClickThrough with isAnyModalOpen()`);
+  assert(code.includes('enableClickThrough && (isAnyModalOpen()') || code.includes('enableClickThrough && isAnyModalOpen()'), `${relPath} guards setClickThrough with isAnyModalOpen()`);
   assert(code.includes('if (isAnyModalOpen()) {\n      clearTimeout(idleTimer);\n      setClickThrough(false);\n      return;\n    }'), `${relPath} halts click-through in mousemove handler when modal is open`);
   assert(code.includes('if (!isAnyModalOpen()) {\n      setClickThrough(true);'), `${relPath} guards bar mouseleave with !isAnyModalOpen()`);
   assert(code.includes('if (!isAnyModalOpen()) {\n      setClickThrough(true);\n    }'), `${relPath} guards forceHideDock with !isAnyModalOpen()`);

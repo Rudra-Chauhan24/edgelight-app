@@ -41,12 +41,12 @@ const VERSION    = (process.argv[2] || pkgVersion).replace(/^v/i, '').trim();
 const DL_URL     = process.argv[3] ||
   `https://github.com/Rudra-Chauhan24/edgelight-app/releases/download/v${VERSION}/Edge.Light.Setup.${VERSION}.exe`;
 
-const RELEASE_NOTES = `⚡ Full Payment Flow & Z-Index Redesign:\n` +
-  `• Redesigned window layering so payment options (UPI, GPay, PhonePe, QR, Cards) are never blocked or obscured.\n` +
-  `• Added prominent "Pay via Web Browser" option to checkout in Chrome/Edge with zero overlay interference.\n` +
-  `• Added non-blocking floating payment status pill at screen bottom with 1-click status check & cancel.\n` +
-  `• Added quick plan selection and direct checkout inside Device License modal.\n` +
-  `• Automatic background license synchronization and instant activation on payment.`;
+const RELEASE_NOTES = `✨ Edge Light v1.0.15 Release:\n` +
+  `• Firebase unique device telemetry & Hardware ID tracking with strict duplicate prevention.\n` +
+  `• Enhanced click-through and interaction handling across all verification modals and dialogs.\n` +
+  `• Hardened payment verification with atomic single-use claim protection and anti-tamper locking.\n` +
+  `• Dual-vault AES-256 encrypted license caching with instant offline start (<5ms).\n` +
+  `• Live real-time trial countdown with sub-second accuracy.`;
 
 const MANIFEST = {
   version:     VERSION,
