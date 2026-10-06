@@ -843,14 +843,12 @@
     const successOverlay = document.getElementById('payment-success-overlay');
     const verifyOverlay = document.getElementById('payment-verification-overlay');
     const offlineLockOverlay = document.getElementById('offline-lock-overlay');
-    const ota = otaBanner || document.getElementById('ota-banner');
     return Boolean(
       (licModal && licModal.classList.contains('visible')) ||
       (wizModal && wizModal.classList.contains('visible')) ||
       Boolean(successOverlay) ||
       Boolean(verifyOverlay) ||
-      Boolean(offlineLockOverlay) ||
-      (ota && ota.classList.contains('visible'))
+      Boolean(offlineLockOverlay)
     );
   }
 
@@ -3102,13 +3100,32 @@
     }
     if (otaProgressBox) otaProgressBox.classList.add('hidden');
     otaBanner.classList.add('visible');
-    setClickThrough(false);
+    const otaRect = otaBanner.getBoundingClientRect();
+    const isOverOta = (
+      state.mouseX >= otaRect.left &&
+      state.mouseX <= otaRect.right &&
+      state.mouseY >= otaRect.top &&
+      state.mouseY <= otaRect.bottom
+    );
+    if (isOverOta || isInteractingWithDock || isPointerDown || isAnyModalOpen()) {
+      setClickThrough(false);
+    } else {
+      setClickThrough(true);
+    }
   }
 
   function hideOtaBanner() {
     if (!otaBanner) return;
     otaBanner.classList.remove('visible');
-    if (!isAnyModalOpen() && !bar.classList.contains('visible')) {
+    const barRect = bar?.classList.contains('visible') ? bar.getBoundingClientRect() : null;
+    const isOverBar = barRect && (
+      state.mouseX >= barRect.left &&
+      state.mouseX <= barRect.right &&
+      state.mouseY >= barRect.top &&
+      state.mouseY <= barRect.bottom
+    );
+    if (!isAnyModalOpen() && !isOverBar && !isPointerDown) {
+      isInteractingWithDock = false;
       setClickThrough(true);
     }
   }
@@ -3125,6 +3142,11 @@
   otaBanner?.addEventListener('mouseenter', () => setClickThrough(false));
   otaBanner?.addEventListener('pointerenter', () => setClickThrough(false));
   otaBanner?.addEventListener('mouseover', () => setClickThrough(false));
+  otaBanner?.addEventListener('mouseleave', () => {
+    if (!isInteractingWithDock && !isPointerDown && !isAnyModalOpen()) {
+      setClickThrough(true);
+    }
+  });
 
   otaCloseBtn?.addEventListener('click', dismissUpdateBanner);
   otaRemindBtn?.addEventListener('click', dismissUpdateBanner);
