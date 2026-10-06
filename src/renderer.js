@@ -1051,7 +1051,8 @@
     const otaEl = otaBanner || document.getElementById('ota-banner');
     let isInsideOta = false;
     if (otaEl && otaEl.classList.contains('visible')) {
-      const otaRect = otaEl.getBoundingClientRect();
+      const otaContent = otaEl.querySelector('.ota-content') || otaEl;
+      const otaRect = otaContent.getBoundingClientRect();
       isInsideOta = (
         e.clientX >= otaRect.left &&
         e.clientX <= otaRect.right &&
@@ -3100,7 +3101,8 @@
     }
     if (otaProgressBox) otaProgressBox.classList.add('hidden');
     otaBanner.classList.add('visible');
-    const otaRect = otaBanner.getBoundingClientRect();
+    const otaContent = otaBanner.querySelector('.ota-content') || otaBanner;
+    const otaRect = otaContent.getBoundingClientRect();
     const isOverOta = (
       state.mouseX >= otaRect.left &&
       state.mouseX <= otaRect.right &&
@@ -3139,10 +3141,10 @@
     hideOtaBanner();
   }
 
-  otaBanner?.addEventListener('mouseenter', () => setClickThrough(false));
-  otaBanner?.addEventListener('pointerenter', () => setClickThrough(false));
-  otaBanner?.addEventListener('mouseover', () => setClickThrough(false));
-  otaBanner?.addEventListener('mouseleave', () => {
+  const otaInteractiveCard = otaBanner?.querySelector('.ota-content') || otaBanner;
+  otaInteractiveCard?.addEventListener('mouseenter', () => setClickThrough(false));
+  otaInteractiveCard?.addEventListener('pointerenter', () => setClickThrough(false));
+  otaInteractiveCard?.addEventListener('mouseleave', () => {
     if (!isInteractingWithDock && !isPointerDown && !isAnyModalOpen()) {
       setClickThrough(true);
     }
