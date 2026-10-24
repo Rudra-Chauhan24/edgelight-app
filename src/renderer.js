@@ -726,6 +726,8 @@
     const nextState = !state.on;
     if (!nextState && currentWebcamInUse) {
       manualTurnedOffWhileWebcamActive = true;
+    } else if (nextState) {
+      manualTurnedOffWhileWebcamActive = false;
     }
     wasTurnedOnByWebcam = false;
     setOn(nextState);
@@ -750,12 +752,16 @@
   tempInput.addEventListener('input', () => {
     const v = Number(tempInput.value);
     state.temp = v / 100;
+    renderState.temp = state.temp;
     // Kelvin readout: 0→3744K, 50→5000K, 100→6500K (linear piecewise)
     const kelvin = v <= 50
       ? Math.round(3744 + (5000 - 3744) * (v / 50))
       : Math.round(5000 + (6500 - 5000) * ((v - 50) / 50));
     if (tempVal) tempVal.textContent = `${kelvin}K`;
     showStatus(`🌡️ Temp: ${kelvin}K`, 1600);
+    if (state.on && renderState.thickScale > 0.002) {
+      drawFrame();
+    }
     requestRender();
   });
 
@@ -764,9 +770,13 @@
     const max = Number(thicknessInput.max) || 180;
     const clamped = Math.min(max, Math.max(min, Math.round(val)));
     state.thickness = clamped;
+    renderState.thickness = clamped;
     thicknessInput.value = clamped;
     thicknessVal.textContent = `${clamped}px`;
     showStatus(`📐 Thickness: ${clamped}px`, 1600);
+    if (state.on && renderState.thickScale > 0.002) {
+      drawFrame();
+    }
     requestRender();
   }
 
@@ -868,6 +878,7 @@
   }
 
   function showDock() {
+    try { tickCountdown(); } catch (_) {}
     bar.classList.add('visible');
     hoverZone.classList.add('dock-open');
     hoverZone.style.pointerEvents = 'none';
@@ -1146,7 +1157,14 @@
       if (stream) {
         stopAuto();
       }
-      setOn(!state.on);
+      const nextState = !state.on;
+      if (!nextState && currentWebcamInUse) {
+        manualTurnedOffWhileWebcamActive = true;
+      } else if (nextState) {
+        manualTurnedOffWhileWebcamActive = false;
+      }
+      wasTurnedOnByWebcam = false;
+      setOn(nextState);
       showStatus(state.on ? 'Edge Light On ✨' : 'Edge Light Off', 2500);
     });
 
@@ -1162,6 +1180,12 @@
       if (stream) {
         stopAuto();
       }
+      if (!desiredState && currentWebcamInUse) {
+        manualTurnedOffWhileWebcamActive = true;
+      } else if (desiredState) {
+        manualTurnedOffWhileWebcamActive = false;
+      }
+      wasTurnedOnByWebcam = false;
       setOn(desiredState);
     });
   }
@@ -1201,7 +1225,14 @@
       if (stream) {
         stopAuto();
       }
-      setOn(!state.on);
+      const nextState = !state.on;
+      if (!nextState && currentWebcamInUse) {
+        manualTurnedOffWhileWebcamActive = true;
+      } else if (nextState) {
+        manualTurnedOffWhileWebcamActive = false;
+      }
+      wasTurnedOnByWebcam = false;
+      setOn(nextState);
       showDock();
     }
     if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey && !e.altKey
@@ -1547,26 +1578,102 @@
     return clean;
   }
 
+  let webcamDebounceTimer = null;
+  let isSamplingAmbient = false;
+
+  async function checkAmbientLightSafe() {
+    if (isSamplingAmbient) return;
+    if (!navigator.mediaDevices?.getUserMedia) return;
+    isSamplingAmbient = true;
+    try {
+      const probeStream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 160 }, height: { ideal: 120 } },
+        audio: false
+      });
+      if (probeStream) {
+        const probeVideo = document.createElement('video');
+        probeVideo.muted = true;
+        probeVideo.srcObject = probeStream;
+        await probeVideo.play().catch(() => {});
+        const probeCanvas = document.createElement('canvas');
+        probeCanvas.width = 64;
+        probeCanvas.height = 48;
+        const probeCtx = probeCanvas.getContext('2d', { willReadFrequently: true });
+        if (probeCtx && probeVideo.videoWidth > 0) {
+          probeCtx.drawImage(probeVideo, 0, 0, 64, 48);
+          const imgData = probeCtx.getImageData(0, 0, 64, 48).data;
+          let weightedSum = 0;
+          let totalWeight = 0;
+          for (let y = 0; y < 48; y += 2) {
+            const isCenterY = y >= 12 && y <= 36;
+            for (let x = 0; x < 64; x += 2) {
+              const isCenterX = x >= 16 && x <= 48;
+              const weight = (isCenterX && isCenterY) ? 2.2 : 1.0;
+              const idx = (y * 64 + x) * 4;
+              const lum = 0.299 * imgData[idx] + 0.587 * imgData[idx + 1] + 0.114 * imgData[idx + 2];
+              weightedSum += lum * weight;
+              totalWeight += weight;
+            }
+          }
+          const lux = totalWeight > 0 ? Math.round(weightedSum / totalWeight) : 50;
+          if (liveLux) {
+            liveLux.textContent = `· ${lux}`;
+            liveLux.style.color = lux < state.autoThreshold ? '#ffb366' : '#85d2ff';
+          }
+          if (lux < state.autoThreshold) {
+            showStatus(`🌑 Low light (${lux}) — Edge Light On ✨`, 2600);
+          }
+        }
+        // Immediately stop and release camera tracks so camera is NOT kept running!
+        probeStream.getTracks().forEach(t => {
+          try { t.stop(); } catch (e) {}
+        });
+        probeVideo.srcObject = null;
+      }
+    } catch (e) {
+      // Normal when another application has exclusive lock on camera
+      // Video call host application is completely unaffected.
+    } finally {
+      isSamplingAmbient = false;
+    }
+  }
+
   function handleWebcamAccessChange(inUse, activeApps) {
-    currentWebcamInUse = inUse;
+    currentWebcamInUse = !!inUse;
     if (!autoWebcamEnabled) return;
 
     if (inUse) {
+      if (webcamDebounceTimer) {
+        clearTimeout(webcamDebounceTimer);
+        webcamDebounceTimer = null;
+      }
+
       if (!manualTurnedOffWhileWebcamActive) {
-        wasTurnedOnByWebcam = true;
         if (!state.on) {
+          wasTurnedOnByWebcam = true;
           setOn(true);
           const appLabel = activeApps && activeApps[0] ? ` (${cleanAppName(activeApps[0])})` : '';
           showStatus(`📷 Camera active${appLabel} — Edge Light on ✨`, 2600);
+          checkAmbientLightSafe();
         }
       }
     } else {
       manualTurnedOffWhileWebcamActive = false;
-      if (wasTurnedOnByWebcam && state.on) {
-        wasTurnedOnByWebcam = false;
-        setOn(false);
-        showStatus('📷 Camera released — Edge Light off', 2200);
+
+      // Debounce turning OFF by 2500ms to eliminate flickering or rapid ON/OFF cycles
+      // when switching apps, transitioning rooms, or camera frame delays
+      if (webcamDebounceTimer) {
+        clearTimeout(webcamDebounceTimer);
       }
+
+      webcamDebounceTimer = setTimeout(() => {
+        webcamDebounceTimer = null;
+        if (!currentWebcamInUse && wasTurnedOnByWebcam && state.on) {
+          wasTurnedOnByWebcam = false;
+          setOn(false);
+          showStatus('📷 Camera released — Edge Light off', 2200);
+        }
+      }, 2500);
     }
   }
   window.__handleWebcamAccessChange = handleWebcamAccessChange;
@@ -1575,6 +1682,15 @@
     window.edgeLightAPI.onWebcamAccessChanged((inUse, activeApps) => {
       handleWebcamAccessChange(inUse, activeApps);
     });
+  }
+
+  // On startup, immediately query camera status from main process in case camera is already in use
+  if (window.edgeLightAPI?.getWebcamStatus) {
+    window.edgeLightAPI.getWebcamStatus().then((status) => {
+      if (status && status.inUse) {
+        handleWebcamAccessChange(true, status.activeApps || []);
+      }
+    }).catch(() => {});
   }
 
   function toggleAuto() {
@@ -1630,8 +1746,65 @@
   // Ensure default click-through mode is engaged (dock hidden by default)
   setClickThrough(true);
 
-  // ── REAL-TIME TRIAL COUNTDOWN ENGINE ──────────────────────────────
-  let trialCountdownTimer = null;
+  // ── REAL-TIME COUNTDOWN ENGINE (TRIAL & SUBSCRIPTIONS) ─────────────
+  let countdownTimer = null;
+
+  function formatSubscriptionRemaining(info) {
+    if (!info || !info.expiresAt) {
+      return {
+        isLifetime: true,
+        badgeText: 'Lifetime',
+        badgeTitle: 'Lifetime Pro — Permanent License Active',
+        modalText: '✓ Lifetime Pro Active (Lifetime Validity)',
+        descText: 'This device is permanently licensed (Lifetime Pro). All pro features and real-time screen ring illumination are fully unlocked forever.',
+        daysRemaining: 9999,
+        hoursRemaining: 9999,
+        expired: false,
+        expDateStr: 'Permanent'
+      };
+    }
+
+    const expTime = new Date(info.expiresAt).getTime();
+    const remainingMs = Math.max(0, expTime - Date.now());
+    const expDateStr = formatDateDDMMYYYY(info.expiresAt) || new Date(info.expiresAt).toLocaleDateString();
+
+    if (remainingMs <= 0) {
+      return {
+        isLifetime: false,
+        badgeText: 'Expired',
+        badgeTitle: `${info.planName || 'Subscription'} Pass Expired — Renewal Required`,
+        modalText: `⌛ ${info.planName || 'Subscription'} Pass Expired — Renew Below`,
+        descText: `Your ${info.planName || 'subscription'} pass has expired. Complete payment below to renew and continue using Edge Light.`,
+        daysRemaining: 0,
+        hoursRemaining: 0,
+        expired: true,
+        expDateStr
+      };
+    }
+
+    const totalSecs = Math.floor(remainingMs / 1000);
+    const totalHours = Math.floor(totalSecs / 3600);
+    const wholeDays = Math.max(0, Math.floor((remainingMs + 60000) / 86400000));
+
+    const badgeText = `Pro: ${wholeDays}d`;
+    const modalText = wholeDays > 0
+      ? `✓ ${info.planName || 'Commercial Pass'} Active (${wholeDays} days remaining)`
+      : `✓ ${info.planName || 'Commercial Pass'} Active (${Math.max(1, totalHours)} hours left — expires today)`;
+
+    const descText = `Active ${info.planName || 'Commercial Pass'}. ${wholeDays} day${wholeDays === 1 ? '' : 's'} remaining (valid through ${expDateStr}). After that, payment can be done anytime to renew for next time use. All pro screen ring features are unlocked.`;
+
+    return {
+      isLifetime: false,
+      badgeText,
+      badgeTitle: `${info.planName || 'Commercial Pass'}: ${wholeDays} day${wholeDays === 1 ? '' : 's'} remaining (Valid through ${expDateStr})`,
+      modalText,
+      descText,
+      daysRemaining: wholeDays,
+      hoursRemaining: totalHours,
+      expired: false,
+      expDateStr
+    };
+  }
 
   function formatTrialRemaining(remainingMs) {
     if (remainingMs <= 0) {
@@ -1665,60 +1838,99 @@
     return { badge: badgeText, modal: modalText, expired: false, days, hours, mins, secs, totalHours };
   }
 
-  function tickTrialCountdown() {
-    if (licenseState.status !== 'trial') {
-      stopTrialCountdown();
-      return;
-    }
-    if (!licenseState.trialExpiresAt) {
-      if (licenseState.trialRemainingHours) {
-        licenseState.trialExpiresAt = Date.now() + (licenseState.trialRemainingHours * 3600 * 1000);
-      } else {
-        return;
+  function tickCountdown() {
+    if (licenseState.status === 'trial') {
+      if (!licenseState.trialExpiresAt) {
+        if (licenseState.trialRemainingHours) {
+          licenseState.trialExpiresAt = Date.now() + (licenseState.trialRemainingHours * 3600 * 1000);
+        } else {
+          return;
+        }
       }
-    }
 
-    const remainingMs = Math.max(0, licenseState.trialExpiresAt - Date.now());
-    const formatted = formatTrialRemaining(remainingMs);
+      const remainingMs = Math.max(0, licenseState.trialExpiresAt - Date.now());
+      const formatted = formatTrialRemaining(remainingMs);
 
-    if (licenseBadge) {
-      if (formatted.expired) {
-        licenseBadge.className = 'license-badge expired';
-        licenseBadge.textContent = 'Expired';
-        licenseBadge.title = 'Free Trial Expired — Activation Required';
+      if (licenseBadge) {
+        if (formatted.expired) {
+          licenseBadge.className = 'license-badge expired';
+          licenseBadge.textContent = 'Expired';
+          licenseBadge.title = 'Free Trial Expired — Activation Required';
+          licenseState.status = 'expired';
+          licenseState.isAuthorized = false;
+          if (state.on) setOn(false);
+          updateLicenseUI(licenseState);
+          return;
+        } else {
+          licenseBadge.className = 'license-badge';
+          licenseBadge.textContent = formatted.badge;
+          licenseBadge.title = `3-Day Free Trial: ${formatted.badge} remaining`;
+        }
+      }
+
+      if (modalStatusBadge) {
+        if (formatted.expired) {
+          modalStatusBadge.className = 'license-status-badge expired';
+          modalStatusBadge.textContent = '⌛ 3-Day Free Trial Expired';
+        } else {
+          modalStatusBadge.className = 'license-status-badge';
+          modalStatusBadge.textContent = formatted.modal;
+        }
+      }
+    } else if (licenseState.status === 'approved' && licenseState.expiresAt) {
+      const sub = formatSubscriptionRemaining(licenseState);
+      if (sub.expired) {
         licenseState.status = 'expired';
         licenseState.isAuthorized = false;
         if (state.on) setOn(false);
-      } else {
-        licenseBadge.className = 'license-badge';
-        licenseBadge.textContent = formatted.badge;
-        licenseBadge.title = `3-Day Free Trial: ${formatted.badge} remaining`;
+        updateLicenseUI(licenseState);
+        return;
       }
-    }
 
-    if (modalStatusBadge) {
-      if (formatted.expired) {
-        modalStatusBadge.className = 'license-status-badge expired';
-        modalStatusBadge.textContent = '⌛ 3-Day Free Trial Expired';
-      } else {
-        modalStatusBadge.className = 'license-status-badge';
-        modalStatusBadge.textContent = formatted.modal;
+      if (licenseBadge) {
+        licenseBadge.className = 'license-badge licensed';
+        licenseBadge.textContent = sub.badgeText;
+        licenseBadge.title = sub.badgeTitle;
       }
+
+      if (modalStatusBadge) {
+        modalStatusBadge.className = 'license-status-badge approved';
+        modalStatusBadge.textContent = sub.modalText;
+      }
+
+      if (openPlansFromLicenseBtn && !sub.expired) {
+        openPlansFromLicenseBtn.textContent = `✓ ${licenseState.planName || 'Pass'} (${sub.daysRemaining}d left) — Renew / Extend`;
+      }
+    } else {
+      stopCountdown();
     }
   }
 
-  function startTrialCountdown() {
-    if (trialCountdownTimer) clearInterval(trialCountdownTimer);
-    tickTrialCountdown();
-    trialCountdownTimer = setInterval(tickTrialCountdown, 1000);
+  function startCountdown() {
+    if (countdownTimer) clearInterval(countdownTimer);
+    tickCountdown();
+    countdownTimer = setInterval(tickCountdown, 1000);
   }
 
-  function stopTrialCountdown() {
-    if (trialCountdownTimer) {
-      clearInterval(trialCountdownTimer);
-      trialCountdownTimer = null;
+  function stopCountdown() {
+    if (countdownTimer) {
+      clearInterval(countdownTimer);
+      countdownTimer = null;
     }
   }
+
+  const startTrialCountdown = startCountdown;
+  const stopTrialCountdown = stopCountdown;
+  const tickTrialCountdown = tickCountdown;
+
+  window.addEventListener('focus', () => {
+    try { tickCountdown(); } catch (_) {}
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      try { tickCountdown(); } catch (_) {}
+    }
+  });
 
   // ── LICENSE & HWID MODAL MANAGEMENT ──────────────────────────────
   function updateLicenseUI(info) {
@@ -1732,40 +1944,63 @@
     if (licenseBadge) {
       licenseBadge.className = 'license-badge';
       if (info.status === 'approved') {
-        stopTrialCountdown();
-        licenseBadge.textContent = '✓ Pro';
-        licenseBadge.classList.add('licensed');
-        licenseBadge.title = 'Commercial Lifetime License Active';
+        const sub = formatSubscriptionRemaining(info);
+        if (sub.expired) {
+          licenseBadge.textContent = 'Expired';
+          licenseBadge.classList.add('expired');
+          licenseBadge.title = sub.badgeTitle;
+          licenseState.status = 'expired';
+          licenseState.isAuthorized = false;
+          if (state.on) setOn(false);
+          stopCountdown();
+        } else {
+          licenseBadge.textContent = sub.badgeText;
+          licenseBadge.classList.add('licensed');
+          licenseBadge.title = sub.badgeTitle;
+          if (!sub.isLifetime) {
+            startCountdown();
+          } else {
+            stopCountdown();
+          }
+        }
       } else if (info.status === 'rejected') {
-        stopTrialCountdown();
+        stopCountdown();
         licenseBadge.textContent = 'Blocked';
         licenseBadge.classList.add('rejected');
         licenseBadge.title = 'Device access revoked by administrator';
       } else if (info.status === 'offline_locked') {
-        stopTrialCountdown();
+        stopCountdown();
         licenseBadge.textContent = '📡 Offline';
         licenseBadge.classList.add('expired');
         licenseBadge.title = 'Connect to internet to verify license';
       } else if (info.status === 'expired' || info.status === 'clock_tampered') {
-        stopTrialCountdown();
+        stopCountdown();
         licenseBadge.textContent = 'Expired';
         licenseBadge.classList.add('expired');
-        licenseBadge.title = 'Free Trial Expired — Activation Required';
+        licenseBadge.title = info.planName && info.planName !== '3-Day Free Trial'
+          ? `${info.planName} Expired — Renewal Required`
+          : 'Free Trial Expired — Activation Required';
       } else if (info.status === 'evaluating') {
-        stopTrialCountdown();
+        stopCountdown();
         licenseBadge.textContent = 'Trial: 3d';
         licenseBadge.title = 'Verifying trial license status…';
       } else {
         // Active trial with live real-time countdown
-        startTrialCountdown();
+        startCountdown();
       }
     }
 
     if (modalStatusBadge) {
       modalStatusBadge.className = 'license-status-badge';
       if (info.status === 'approved') {
-        modalStatusBadge.textContent = '✓ Commercial License Active';
-        modalStatusBadge.classList.add('approved');
+        const sub = formatSubscriptionRemaining(info);
+        if (sub.expired) {
+          modalStatusBadge.textContent = sub.modalText;
+          modalStatusBadge.classList.add('expired');
+        } else {
+          modalStatusBadge.textContent = sub.modalText;
+          modalStatusBadge.classList.add('approved');
+        }
       } else if (info.status === 'rejected' || info.status === 'revoked') {
         modalStatusBadge.textContent = '🚫 Device Access Revoked';
         modalStatusBadge.classList.add('rejected');
@@ -1773,7 +2008,9 @@
         modalStatusBadge.textContent = '📡 Offline — Connect to verify license';
         modalStatusBadge.classList.add('expired');
       } else if (info.status === 'expired') {
-        modalStatusBadge.textContent = '⌛ 3-Day Free Trial Expired';
+        modalStatusBadge.textContent = info.planName && info.planName !== '3-Day Free Trial'
+          ? `⌛ ${info.planName} Expired — Renew Below`
+          : '⌛ 3-Day Free Trial Expired — Choose a Pass Below';
         modalStatusBadge.classList.add('expired');
       } else if (info.status === 'clock_tampered') {
         modalStatusBadge.textContent = '⚠️ System Clock Tampering Detected';
@@ -1781,24 +2018,23 @@
       } else if (info.status === 'evaluating') {
         modalStatusBadge.textContent = '⏳ Checking License Status…';
       } else {
-        tickTrialCountdown();
+        tickCountdown();
       }
     }
 
     if (licenseDescription) {
       if (info.status === 'approved') {
-        if (info.expiresAt) {
-          licenseDescription.textContent = `Active ${info.planName || 'Commercial Pass'}. Valid through ${new Date(info.expiresAt).toLocaleDateString()}. All pro screen ring features are unlocked.`;
-        } else {
-          licenseDescription.textContent = 'This device is permanently licensed (Lifetime Pro). All pro features and real-time screen ring illumination are fully unlocked forever.';
-        }
+        const sub = formatSubscriptionRemaining(info);
+        licenseDescription.textContent = sub.descText;
         if (info.licenseKey) {
           licenseDescription.textContent += ` [Key: ${info.licenseKey}]`;
         }
       } else if (info.status === 'rejected' || info.status === 'revoked') {
         licenseDescription.textContent = 'Access for this machine has been restricted by the administrator. Contact your administrator with the Hardware ID above if you believe this was in error.';
       } else if (info.status === 'expired') {
-        licenseDescription.textContent = 'Your 3-day free evaluation period has concluded. To continue using Edge Light, please choose an affordable pass under ₹100 or share your Hardware ID with your administrator.';
+        licenseDescription.textContent = info.planName && info.planName !== '3-Day Free Trial'
+          ? `Your ${info.planName} pass has expired. Choose an affordable pass below to renew and continue using Edge Light for your video calls.`
+          : 'Your 3-day free evaluation period has concluded. To continue using Edge Light, please choose an affordable pass under ₹100 or share your Hardware ID with your administrator.';
       } else {
         licenseDescription.textContent = 'Every machine automatically receives a 72-hour free evaluation window. When ready to upgrade, choose an affordable pass under ₹100.';
       }
@@ -1811,20 +2047,45 @@
       }
       power.classList.remove('active');
       power.setAttribute('aria-pressed', 'false');
-      power.title = 'License required — Click to view HWID';
+      power.title = info.status === 'expired' ? 'License expired — Click to renew' : 'License required — Click to view HWID';
     } else {
       power.title = state.on ? 'Turn Off (Ctrl+Shift+L)' : 'Turn On (Ctrl+Shift+L)';
     }
 
     if (openPlansFromLicenseBtn) {
       if (info.status === 'approved') {
-        openPlansFromLicenseBtn.textContent = '✓ Commercial License Active';
-        openPlansFromLicenseBtn.classList.remove('pulse-glow');
-        openPlansFromLicenseBtn.style.opacity = '0.85';
+        const sub = formatSubscriptionRemaining(info);
+        if (sub.isLifetime) {
+          openPlansFromLicenseBtn.textContent = '✓ Lifetime Pro Active';
+          openPlansFromLicenseBtn.classList.remove('pulse-glow');
+          openPlansFromLicenseBtn.style.opacity = '0.85';
+        } else {
+          openPlansFromLicenseBtn.textContent = `✓ ${info.planName || 'Pass'} (${sub.daysRemaining}d left) — Renew / Extend`;
+          openPlansFromLicenseBtn.classList.remove('pulse-glow');
+          openPlansFromLicenseBtn.style.opacity = '1';
+        }
+      } else if (info.status === 'expired') {
+        openPlansFromLicenseBtn.textContent = '💳 Renew License / View Plans (from ₹29)';
+        openPlansFromLicenseBtn.classList.add('pulse-glow');
+        openPlansFromLicenseBtn.style.opacity = '1';
       } else {
         openPlansFromLicenseBtn.textContent = '💳 Upgrade / View Plans (from ₹29)';
         openPlansFromLicenseBtn.classList.add('pulse-glow');
         openPlansFromLicenseBtn.style.opacity = '1';
+      }
+    }
+
+    // Update quick pay button label in license modal
+    const quickPayBtn = document.getElementById('licenseQuickPayBtn');
+    if (quickPayBtn) {
+      const plansSource = paymentConfig?.plansById || paymentConfig?.plans;
+      const currentPlan = (plansSource && plansSource[currentSelectedPlanId]) || { price: 49 };
+      if (info.status === 'expired') {
+        quickPayBtn.innerHTML = `⚡ Renew ₹<span id="licenseQuickPrice">${currentPlan.price || 49}</span> with Razorpay`;
+      } else if (info.status === 'approved' && info.expiresAt) {
+        quickPayBtn.innerHTML = `⚡ Extend Pass ₹<span id="licenseQuickPrice">${currentPlan.price || 49}</span> with Razorpay`;
+      } else {
+        quickPayBtn.innerHTML = `⚡ Pay ₹<span id="licenseQuickPrice">${currentPlan.price || 49}</span> with Razorpay`;
       }
     }
   }
@@ -2117,6 +2378,38 @@
   const pspCancelBtn = document.getElementById('pspCancelBtn');
   const licenseQuickPayBtn = document.getElementById('licenseQuickPayBtn');
   let activePaymentUrl = null;
+  let paymentSessionStartTime = 0;
+  let sessionInitialPaymentId = null;
+  let paymentElapsedInterval = null;
+
+  function startPaymentTimer() {
+    stopPaymentTimer();
+    const updateTimer = () => {
+      const el = document.getElementById('verifElapsedTimer');
+      if (!el) return;
+      const elapsedSec = Math.floor(Math.max(0, Date.now() - paymentSessionStartTime) / 1000);
+      const mins = String(Math.floor(elapsedSec / 60)).padStart(2, '0');
+      const secs = String(elapsedSec % 60).padStart(2, '0');
+      el.textContent = `${mins}:${secs}`;
+    };
+    updateTimer();
+    paymentElapsedInterval = setInterval(updateTimer, 1000);
+  }
+
+  function stopPaymentTimer() {
+    if (paymentElapsedInterval) {
+      clearInterval(paymentElapsedInterval);
+      paymentElapsedInterval = null;
+    }
+  }
+
+  function getPlanPrice(data) {
+    if (data?.plan?.price) return data.plan.price;
+    const pid = String(data?.planId || currentSelectedPlanId || '').toLowerCase();
+    if (pid === 'monthly') return 29;
+    if (pid === 'lifetime') return 99;
+    return 49;
+  }
 
   async function resolvePaymentUrl() {
     const plansSource = paymentConfig.plansById || (Array.isArray(paymentConfig.plans)
@@ -2149,18 +2442,30 @@
     activePaymentUrl = url;
     isPaymentSessionOpen = true;
 
+    // Track session start time and initial payment ID to prevent false verification from old licenses
+    paymentSessionStartTime = Date.now();
+    sessionInitialPaymentId = licenseState.paymentId || null;
+
     // Keep modals visible and interactive so user never loses their checkout context!
     setClickThrough(false);
 
     const pollingStatusText = document.getElementById('pollingStatusText');
     if (pollingStatusText) {
-      pollingStatusText.textContent = `⏳ Checkout opened for ₹${plan.price || 49}. Waiting for payment... (checks every 3s)`;
+      pollingStatusText.textContent = `⏳ Checkout opened for ₹${plan.price || 49}. Waiting for payment... (checks every 3.5s)`;
     }
 
     // Inform main process to demote alwaysOnTop so user can view their browser if opened
     if (window.edgeLightAPI?.startPaymentSession) {
       await window.edgeLightAPI.startPaymentSession();
     }
+
+    // Display the real-time payment flow & timeline modal immediately
+    showPaymentVerificationModal('verifying', {
+      plan,
+      planId: currentSelectedPlanId,
+      url,
+      hwid
+    });
 
     // Open checkout in requested mode
     if (mode === 'browser') {
@@ -2185,9 +2490,6 @@
             if (result.verified && result.licenseInfo) {
               endPaymentSession(false);
               showPaymentVerificationModal('verified', result.licenseInfo);
-            } else {
-              showPaymentVerificationModal('verifying', { planId: currentSelectedPlanId, hwid });
-              startPaymentActivationPolling(currentSelectedPlanId);
             }
           }
         }).catch(() => {});
@@ -2205,6 +2507,7 @@
   async function endPaymentSession(restoreUI = false, step = 3) {
     isPaymentSessionOpen = false;
     stopPaymentActivationPolling();
+    stopPaymentTimer();
     if (paymentStatusPill) {
       paymentStatusPill.classList.add('hidden');
     }
@@ -2269,22 +2572,36 @@
   let isManualActivating = false;
   async function handleManualActivation(inputEl, feedbackEl, planId) {
     if (isManualActivating) return;
+    const isLicenseManual = feedbackEl && feedbackEl.id === 'licenseManualFeedback';
+    const baseFeedbackClass = isLicenseManual ? 'license-manual-feedback' : 'mac-feedback';
+
+    const setFeedbackState = (type, msg) => {
+      if (!feedbackEl) return;
+      feedbackEl.className = type ? `${baseFeedbackClass} ${type}` : baseFeedbackClass;
+      feedbackEl.textContent = msg;
+      feedbackEl.classList.remove('hidden');
+    };
+
     const val = inputEl?.value?.trim();
     if (!val || val.length < 4) {
-      if (feedbackEl) {
-        feedbackEl.className = 'mac-feedback error';
-        feedbackEl.textContent = 'Please enter a valid Razorpay Payment ID or 12-digit UPI Ref (UTR).';
-        feedbackEl.classList.remove('hidden');
-      }
+      setFeedbackState('error', 'Please enter a valid Razorpay Payment ID or 12-digit UPI Ref (UTR).');
+      return;
+    }
+
+    // 1. Validate Payment ID / UTR: Reject current Device Hardware ID
+    const currentHwid = (licenseState?.hwid || hwidDisplay?.textContent || '').trim();
+    const isHwidMatch =
+      (currentHwid && val.toLowerCase() === currentHwid.toLowerCase()) ||
+      (currentHwid && val.replace(/[\s-]/g, '').toLowerCase() === currentHwid.replace(/[\s-]/g, '').toLowerCase()) ||
+      /^[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}$/.test(val);
+
+    if (isHwidMatch) {
+      setFeedbackState('error', 'This is your Hardware ID, not a Payment ID / UTR. Enter your actual payment reference.');
       return;
     }
 
     isManualActivating = true;
-    if (feedbackEl) {
-      feedbackEl.className = 'mac-feedback';
-      feedbackEl.textContent = '⏳ Verifying & activating license…';
-      feedbackEl.classList.remove('hidden');
-    }
+    setFeedbackState('', '⏳ Verifying & activating license…');
 
     showPaymentVerificationModal('verifying', {
       planId: planId || currentSelectedPlanId || 'quarterly',
@@ -2299,35 +2616,28 @@
           planId: planId || currentSelectedPlanId || 'quarterly'
         });
         if (res && res.success && res.licenseInfo) {
-          if (feedbackEl) {
-            feedbackEl.className = 'mac-feedback success';
-            feedbackEl.textContent = '✓ Payment verified! Pro license activated 🎉';
-          }
+          setFeedbackState('success', '✓ Payment verified! Pro license activated 🎉');
           await endPaymentSession(false);
           showPaymentVerificationModal('verified', res.licenseInfo);
           return;
         } else {
+          const errMsg = res?.error || 'Payment verification failed. Please check your reference and try again.';
+          setFeedbackState('error', errMsg);
           showPaymentVerificationModal('failed', {
-            error: res?.error || 'Payment verification failed. Please check your reference and try again.',
+            error: errMsg,
             paymentId: val,
             planId: planId || currentSelectedPlanId
           });
-          if (feedbackEl) {
-            feedbackEl.className = 'mac-feedback error';
-            feedbackEl.textContent = res?.error || 'Payment verification failed.';
-          }
         }
       }
     } catch (e) {
+      const errMsg = 'Verification error: ' + e.message;
+      setFeedbackState('error', errMsg);
       showPaymentVerificationModal('failed', {
-        error: 'Verification error: ' + e.message,
+        error: errMsg,
         paymentId: val,
         planId: planId || currentSelectedPlanId
       });
-      if (feedbackEl) {
-        feedbackEl.className = 'mac-feedback error';
-        feedbackEl.textContent = 'Verification error: ' + e.message;
-      }
     } finally {
       isManualActivating = false;
     }
@@ -2340,6 +2650,12 @@
     e.stopPropagation();
     handleManualActivation(manualPaymentRefInput, manualFeedback, currentSelectedPlanId);
   });
+  manualPaymentRefInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      manualActivateBtn?.click();
+    }
+  });
 
   const licenseManualBtn = document.getElementById('licenseManualBtn');
   const licenseManualInput = document.getElementById('licenseManualInput');
@@ -2347,6 +2663,12 @@
   licenseManualBtn?.addEventListener('click', (e) => {
     e.stopPropagation();
     handleManualActivation(licenseManualInput, licenseManualFeedback, currentSelectedPlanId);
+  });
+  licenseManualInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      licenseManualBtn?.click();
+    }
   });
 
   // Floating status pill buttons
@@ -2356,7 +2678,12 @@
     try {
       if (window.edgeLightAPI?.refreshLicenseInfo) {
         const updated = await window.edgeLightAPI.refreshLicenseInfo();
-        if (updated && updated.isAuthorized && updated.status === 'approved') {
+        const isNewPaymentId = updated && updated.paymentId && updated.paymentId !== sessionInitialPaymentId;
+        const updatedPaidAtTime = (updated?.paidAt || updated?.approvedAt)
+          ? new Date(updated.paidAt || updated.approvedAt).getTime()
+          : 0;
+        const isNewlyApproved = updated && updated.status === 'approved' && updatedPaidAtTime >= paymentSessionStartTime;
+        if (isNewPaymentId || isNewlyApproved) {
           await endPaymentSession(false);
           showPaymentVerificationModal('verified', updated);
           return;
@@ -2422,11 +2749,21 @@
     let pollCount = 0;
     const MAX_POLLS = 180; // 180 × 3.5s = ~10.5 minutes
 
+    const updatePollCounterDisplay = (count) => {
+      const pollStepBadge = document.getElementById('verifStep3Badge');
+      if (pollStepBadge) {
+        pollStepBadge.textContent = `Listening (Check #${count})`;
+      }
+    };
+
     paymentPollInterval = setInterval(async () => {
       if (isPaymentPollingActive) return;
       pollCount++;
+      updatePollCounterDisplay(pollCount);
+
       if (pollCount > MAX_POLLS) {
         stopPaymentActivationPolling();
+        stopPaymentTimer();
         showPaymentVerificationModal('failed', {
           error: 'Payment verification timed out. If your payment was deducted, please enter your Payment ID or UPI Ref below.',
           planId
@@ -2438,8 +2775,18 @@
       try {
         if (window.edgeLightAPI?.refreshLicenseInfo) {
           const updated = await window.edgeLightAPI.refreshLicenseInfo();
-          if (updated && updated.isAuthorized && updated.status === 'approved') {
+
+          // STRICT VERIFICATION:
+          // Prevent auto-verification from existing/old approved license in vault
+          const isNewPaymentId = updated && updated.paymentId && updated.paymentId !== sessionInitialPaymentId;
+          const updatedPaidAtTime = (updated?.paidAt || updated?.approvedAt)
+            ? new Date(updated.paidAt || updated.approvedAt).getTime()
+            : 0;
+          const isNewlyApproved = updated && updated.status === 'approved' && updatedPaidAtTime >= paymentSessionStartTime;
+
+          if (isNewPaymentId || isNewlyApproved) {
             stopPaymentActivationPolling();
+            stopPaymentTimer();
             await endPaymentSession(false);
             showPaymentVerificationModal('verified', updated);
             return;
@@ -2455,6 +2802,7 @@
   function stopPaymentActivationPolling() {
     if (paymentPollInterval) { clearInterval(paymentPollInterval); paymentPollInterval = null; }
     if (paymentPollTimeout) { clearTimeout(paymentPollTimeout); paymentPollTimeout = null; }
+    isPaymentPollingActive = false;
   }
 
   // ── DATE FORMATTING HELPER (DD/MM/YYYY) ───────────────────────────
@@ -2485,6 +2833,17 @@
     if (existing) existing.remove();
   }
 
+  // ── XSS SANITIZATION HELPER ─────────────────────────────────────────
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
   // ── POST-PAYMENT FLOATING VERIFICATION MODAL ───────────────────────
   function showPaymentVerificationModal(statusType, data) {
     data = data || {};
@@ -2504,7 +2863,26 @@
     const isLifetime = (data.planId === 'lifetime') ||
                        (String(planName).toLowerCase().includes('lifetime')) ||
                        (!data.expiresAt && statusType === 'verified');
-    const validUntilStr = isLifetime ? 'Lifetime' : (formatDateDDMMYYYY(data.expiresAt) || '30 Days');
+    let validUntilStr = 'Lifetime';
+    let validityStatusTag = 'Active (Lifetime)';
+    let validityDescText = 'Permanent lifetime access';
+    if (!isLifetime) {
+      const expDate = data.expiresAt ? new Date(data.expiresAt) : new Date(Date.now() + 30 * 86400000);
+      const remainingDays = Math.max(1, Math.ceil((expDate.getTime() - Date.now()) / 86400000));
+      validUntilStr = `${formatDateDDMMYYYY(expDate)} (${remainingDays} Days)`;
+      validityStatusTag = `Active (${remainingDays}d left)`;
+      validityDescText = `${remainingDays} days valid — renew anytime when expired`;
+    }
+
+    const safePlanName = escapeHtml(planName);
+    const safeHwid = escapeHtml(hwid);
+    const safeAccessId = escapeHtml(accessId);
+    const safeActivatedStr = escapeHtml(activatedStr);
+    const safeValidUntilStr = escapeHtml(validUntilStr);
+    const safeValidityStatusTag = escapeHtml(validityStatusTag);
+    const safeValidityDescText = escapeHtml(validityDescText);
+    const safeErrorMsg = escapeHtml(data.error || 'Payment could not be verified by the licensing system.');
+    const safePaymentId = escapeHtml(data.paymentId || '');
 
     const overlay = document.createElement('div');
     overlay.id = 'payment-verification-overlay';
@@ -2512,6 +2890,7 @@
 
     if (statusType === 'verified') {
       stopPaymentActivationPolling();
+      stopPaymentTimer();
       // Only now mark license as approved in memory & UI
       licenseState = {
         ...licenseState,
@@ -2530,10 +2909,10 @@
           </div>
 
           <div class="verif-plan-bar">
-            <span class="verif-plan-name">${planName}</span>
+            <span class="verif-plan-name">${safePlanName}</span>
             <span class="verif-status-pill status-active">
               <span class="verif-status-dot"></span>
-              Status: Active
+              Status: ${safeValidityStatusTag}
             </span>
           </div>
 
@@ -2541,29 +2920,29 @@
             <div class="verif-field">
               <span class="verif-label">Access ID</span>
               <div class="verif-value-wrapper">
-                <code class="verif-code" title="${accessId}">${accessId}</code>
+                <code class="verif-code" title="${safeAccessId}">${safeAccessId}</code>
                 <button class="verif-copy-btn" id="verifCopyAccessIdBtn" type="button" title="Copy Access ID">📋</button>
               </div>
             </div>
             <div class="verif-field">
               <span class="verif-label">Hardware ID</span>
               <div class="verif-value-wrapper">
-                <code class="verif-code" title="${hwid}">${hwid}</code>
+                <code class="verif-code" title="${safeHwid}">${safeHwid}</code>
               </div>
             </div>
             <div class="verif-field">
               <span class="verif-label">Activated</span>
-              <span class="verif-value">${activatedStr}</span>
+              <span class="verif-value">${safeActivatedStr}</span>
             </div>
             <div class="verif-field">
               <span class="verif-label">Valid Until</span>
-              <span class="verif-value highlight-valid">${validUntilStr}</span>
+              <span class="verif-value highlight-valid">${safeValidUntilStr}</span>
             </div>
           </div>
 
           <div class="verif-confirmation">
             <span class="verif-conf-icon">✓</span>
-            <span>Your Edge Light license is active on this device.</span>
+            <span>Your Edge Light license is active on this device (${safeValidityDescText}).</span>
           </div>
 
           <button id="startEdgeLightBtn" class="primary-btn verif-action-btn pulse-glow" type="button">
@@ -2599,44 +2978,94 @@
       });
 
     } else if (statusType === 'verifying') {
+      const planPrice = getPlanPrice(data);
+      const checkoutUrl = data.url || activePaymentUrl || '';
+
       overlay.innerHTML = `
         <div class="verif-card" role="dialog" aria-modal="true" aria-labelledby="verifTitle">
           <div class="verif-header">
             <div class="verif-spinner"></div>
-            <h2 id="verifTitle" class="verif-title">Verifying Payment...</h2>
+            <h2 id="verifTitle" class="verif-title">Awaiting Payment Confirmation…</h2>
           </div>
 
           <div class="verif-plan-bar">
-            <span class="verif-plan-name">${planName}</span>
+            <span class="verif-plan-name">${safePlanName} (₹${planPrice})</span>
             <span class="verif-status-pill status-verifying">
               <span class="verif-status-dot"></span>
-              Status: Verifying
+              Status: In Progress
             </span>
           </div>
 
-          <div class="verif-details-grid">
-            <div class="verif-field">
-              <span class="verif-label">Purchased Plan</span>
-              <span class="verif-value">${planName}</span>
-            </div>
-            <div class="verif-field">
-              <span class="verif-label">Hardware ID</span>
-              <div class="verif-value-wrapper">
-                <code class="verif-code" title="${hwid}">${hwid}</code>
+          <!-- REAL-TIME TIMELINE -->
+          <div class="verif-timeline">
+            <!-- Step 1 -->
+            <div class="verif-tl-step done">
+              <div class="verif-tl-icon">✓</div>
+              <div class="verif-tl-content">
+                <div class="verif-tl-title-row">
+                  <span class="verif-tl-title">1. Checkout Initiated</span>
+                  <span class="verif-tl-badge">Ready</span>
+                </div>
+                <span class="verif-tl-desc">Payment link created for ${safePlanName} (₹${planPrice}).</span>
               </div>
             </div>
-            ${data.paymentId ? `
-            <div class="verif-field full-width">
-              <span class="verif-label">Transaction Reference</span>
-              <div class="verif-value-wrapper">
-                <code class="verif-code">${data.paymentId}</code>
+
+            <!-- Step 2 -->
+            <div class="verif-tl-step active">
+              <div class="verif-tl-icon">⏳</div>
+              <div class="verif-tl-content">
+                <div class="verif-tl-title-row">
+                  <span class="verif-tl-title">2. Awaiting Payment</span>
+                  <span class="verif-tl-badge">Active</span>
+                </div>
+                <span class="verif-tl-desc">Pay via UPI QR, GPay, PhonePe, Paytm, Cards, or NetBanking.</span>
+                <div class="verif-tl-timer-box">
+                  <span>⏱️ Waiting:</span>
+                  <span id="verifElapsedTimer">00:00</span>
+                </div>
               </div>
-            </div>` : ''}
+            </div>
+
+            <!-- Step 3 -->
+            <div class="verif-tl-step">
+              <div class="verif-tl-icon">🔄</div>
+              <div class="verif-tl-content">
+                <div class="verif-tl-title-row">
+                  <span class="verif-tl-title">3. Gateway Verification</span>
+                  <span class="verif-tl-badge" id="verifStep3Badge">Listening (Check #1)</span>
+                </div>
+                <span class="verif-tl-desc">Auto-checking confirmation with Razorpay in real time.</span>
+              </div>
+            </div>
+
+            <!-- Step 4 -->
+            <div class="verif-tl-step">
+              <div class="verif-tl-icon">🔒</div>
+              <div class="verif-tl-content">
+                <div class="verif-tl-title-row">
+                  <span class="verif-tl-title">4. Instant Activation</span>
+                  <span class="verif-tl-badge">Pending</span>
+                </div>
+                <span class="verif-tl-desc">Pro license activates automatically upon payment receipt.</span>
+              </div>
+            </div>
           </div>
 
-          <p class="verif-subtitle">Confirming transaction with licensing system. Please keep this window open…</p>
+          <!-- QUICK ACTIONS -->
+          <div class="verif-tl-actions-row">
+            <button id="verifReopenCheckoutBtn" class="verif-tl-btn" type="button">🌐 Re-open Payment Page</button>
+            <button id="verifCopyCheckoutLinkBtn" class="verif-tl-btn" type="button">📋 Copy Link</button>
+          </div>
 
-          <div class="verif-pulse-track"></div>
+          <!-- INLINE MANUAL UNLOCK -->
+          <div class="verif-retry-box" style="margin-top: 6px;">
+            <span class="verif-label">Already paid? Enter Razorpay Payment ID or 12-Digit UPI Ref:</span>
+            <div class="verif-input-row">
+              <input type="text" id="verifInlineRefInput" class="verif-input" placeholder="e.g. pay_XXXXX or 412345678901" value="${safePaymentId}" />
+              <button id="verifInlineSubmitBtn" class="primary-btn verif-retry-submit" type="button">Verify ⚡</button>
+            </div>
+            <div id="verifInlineFeedback" class="mac-feedback hidden" style="margin-top: 6px;"></div>
+          </div>
 
           <div class="verif-failed-actions" style="margin-top: 4px;">
             <button id="verifCancelPollBtn" class="verif-btn-secondary" type="button">Cancel</button>
@@ -2646,12 +3075,69 @@
 
       document.body.appendChild(overlay);
 
+      // Start the real-time elapsed timer
+      startPaymentTimer();
+
+      // Hook up actions
+      const reopenBtn = document.getElementById('verifReopenCheckoutBtn');
+      reopenBtn?.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const url = activePaymentUrl || checkoutUrl || (await resolvePaymentUrl()).url;
+        if (window.edgeLightAPI?.openPaymentInBrowser) {
+          await window.edgeLightAPI.openPaymentInBrowser(url);
+        } else if (window.edgeLightAPI?.openExternal) {
+          await window.edgeLightAPI.openExternal(url);
+        } else {
+          window.open(url, '_blank');
+        }
+        showStatus('🌐 Re-opened payment link.', 2500);
+      });
+
+      const copyLinkBtn = document.getElementById('verifCopyCheckoutLinkBtn');
+      copyLinkBtn?.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const url = activePaymentUrl || checkoutUrl || (await resolvePaymentUrl()).url;
+        if (url) {
+          navigator.clipboard?.writeText(url);
+          copyLinkBtn.textContent = '✓ Copied!';
+          setTimeout(() => { copyLinkBtn.textContent = '📋 Copy Link'; }, 2000);
+        }
+      });
+
+      const inlineInput = document.getElementById('verifInlineRefInput');
+      const inlineSubmit = document.getElementById('verifInlineSubmitBtn');
+      const inlineFeedback = document.getElementById('verifInlineFeedback');
+
+      const submitInlineManual = () => {
+        const val = inlineInput?.value?.trim();
+        if (val) {
+          handleManualActivation(inlineInput, inlineFeedback, data.planId || currentSelectedPlanId);
+        }
+      };
+
+      inlineSubmit?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        submitInlineManual();
+      });
+
+      inlineInput?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          submitInlineManual();
+        }
+      });
+
       const cancelBtn = document.getElementById('verifCancelPollBtn');
       cancelBtn?.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
         stopPaymentActivationPolling();
+        stopPaymentTimer();
         overlay.remove();
+        endPaymentSession(false);
         if (!isAnyModalOpen() && !isPaymentSessionOpen) {
           setClickThrough(true);
         }
@@ -2659,7 +3145,7 @@
 
     } else if (statusType === 'failed') {
       stopPaymentActivationPolling();
-      const errorMsg = data.error || 'Payment could not be verified by the licensing system.';
+      stopPaymentTimer();
 
       overlay.innerHTML = `
         <div class="verif-card" role="dialog" aria-modal="true" aria-labelledby="verifTitle">
@@ -2669,21 +3155,22 @@
           </div>
 
           <div class="verif-plan-bar">
-            <span class="verif-plan-name">${planName}</span>
+            <span class="verif-plan-name">${safePlanName}</span>
             <span class="verif-status-pill status-failed">
               <span class="verif-status-dot"></span>
               Status: Failed
             </span>
           </div>
 
-          <p class="verif-subtitle error-text">${errorMsg}</p>
+          <p class="verif-subtitle error-text">${safeErrorMsg}</p>
 
           <div class="verif-retry-box">
             <span class="verif-label">Enter Razorpay Payment ID or 12-Digit UPI Ref:</span>
             <div class="verif-input-row">
-              <input type="text" id="verifRetryInput" class="verif-input" placeholder="e.g. pay_XXXXX or 412345678901" value="${data.paymentId || ''}" />
+              <input type="text" id="verifRetryInput" class="verif-input" placeholder="e.g. pay_XXXXX or 412345678901" value="${safePaymentId}" />
               <button id="verifRetrySubmitBtn" class="primary-btn verif-retry-submit" type="button">Verify</button>
             </div>
+            <div id="verifRetryFeedback" class="mac-feedback hidden" style="margin-top: 6px;"></div>
           </div>
 
           <div class="verif-failed-actions">
@@ -2700,6 +3187,7 @@
         e.preventDefault();
         e.stopPropagation();
         overlay.remove();
+        endPaymentSession(false);
         if (!isAnyModalOpen() && !isPaymentSessionOpen) {
           setClickThrough(true);
         }
@@ -2707,12 +3195,23 @@
 
       const retryBtn = document.getElementById('verifRetrySubmitBtn');
       const retryInput = document.getElementById('verifRetryInput');
+      const retryFeedback = document.getElementById('verifRetryFeedback');
       retryBtn?.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
         const refVal = retryInput?.value?.trim();
         if (refVal) {
-          handleManualActivation(retryInput, null, data.planId || currentSelectedPlanId);
+          handleManualActivation(retryInput, retryFeedback, data.planId || currentSelectedPlanId);
+        }
+      });
+
+      retryInput?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const refVal = retryInput?.value?.trim();
+          if (refVal) {
+            handleManualActivation(retryInput, retryFeedback, data.planId || currentSelectedPlanId);
+          }
         }
       });
 
@@ -2721,12 +3220,7 @@
         e.preventDefault();
         e.stopPropagation();
         overlay.remove();
-        const url = activePaymentUrl || (await resolvePaymentUrl()).url;
-        if (window.edgeLightAPI?.openPaymentWindow) {
-          startPaymentSession('window');
-        } else {
-          startPaymentSession('browser');
-        }
+        startPaymentSession('browser');
       });
     }
   }
@@ -2929,6 +3423,9 @@
       }
     });
   }
+
+  // Immediately initialize dynamic license badge and countdown
+  updateLicenseUI(licenseState);
 
   // Initialize license status from Electron main process
   if (window.edgeLightAPI?.getLicenseInfo) {

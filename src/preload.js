@@ -39,6 +39,7 @@ contextBridge.exposeInMainWorld('edgeLightAPI', {
     ipcRenderer.on('webcam-access-changed', subscription);
     return () => ipcRenderer.removeListener('webcam-access-changed', subscription);
   },
+  getWebcamStatus: () => ipcRenderer.invoke('get-webcam-status'),
   getLaunchAtLogin: () => ipcRenderer.invoke('get-launch-at-login'),
   setLaunchAtLogin: (enable) => ipcRenderer.invoke('set-launch-at-login', enable),
   getLicenseInfo: () => ipcRenderer.invoke('get-license-info'),

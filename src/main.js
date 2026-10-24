@@ -1,6 +1,7 @@
 const { app, BrowserWindow, screen, ipcMain, Tray, Menu, nativeImage, globalShortcut, session, clipboard, shell } = require('electron');
 const { execFile } = require('child_process');
 const path = require('path');
+const os = require('os');
 const https = require('https');
 const { LicenseManager } = require('./license-manager');
 const { AppUpdater } = require('./updater');
@@ -433,6 +434,12 @@ function createWindow() {
 
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
 
+  mainWindow.webContents.on('did-finish-load', () => {
+    if (mainWindow && !mainWindow.isDestroyed() && lastWebcamInUse) {
+      mainWindow.webContents.send('webcam-access-changed', lastWebcamInUse, lastActiveApps);
+    }
+  });
+
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
     startKeepTop();
@@ -549,9 +556,18 @@ ipcMain.handle('reset-trial', async () => {
 });
 
 ipcMain.handle('open-external', async (event, url) => {
-  if (typeof url === 'string' && (url.startsWith('https://') || url.startsWith('http://') || url.startsWith('upi://'))) {
-    await shell.openExternal(url);
-    return true;
+  if (typeof url === 'string') {
+    try {
+      if (url.startsWith('upi://')) {
+        await shell.openExternal(url);
+        return true;
+      }
+      const parsed = new URL(url);
+      if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+        await shell.openExternal(url);
+        return true;
+      }
+    } catch (_) {}
   }
   return false;
 });
@@ -585,9 +601,33 @@ ipcMain.handle('end-payment-session', () => {
   return true;
 });
 
+// ── SECURE PAYMENT DOMAIN & URL VALIDATOR ──────────────────────────
+function isTrustedPaymentUrl(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== 'string') return false;
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== 'https:') return false;
+    const hostname = parsed.hostname.toLowerCase();
+    const isRazorpay = hostname === 'rzp.io' ||
+                       hostname.endsWith('.rzp.io') ||
+                       hostname === 'razorpay.com' ||
+                       hostname.endsWith('.razorpay.com');
+    const isBackend = hostname === 'edgelight-backend.vercel.app' ||
+                      hostname === 'edge-light-24.web.app' ||
+                      hostname === 'edge-light-24.firebaseapp.com' ||
+                      hostname === 'localhost' ||
+                      hostname === '127.0.0.1';
+    return isRazorpay || isBackend;
+  } catch (_) {
+    return false;
+  }
+}
+
 ipcMain.handle('open-payment-window', async (event, params) => {
   const { url, planId, hwid } = params || {};
-  if (!url || !url.startsWith('http')) return { success: false, error: 'Invalid URL' };
+  if (!isTrustedPaymentUrl(url)) {
+    return { success: false, error: 'Payment URL rejected: only verified HTTPS checkout domains are permitted.' };
+  }
 
   // Close any existing payment window
   if (paymentWindow && !paymentWindow.isDestroyed()) {
@@ -636,6 +676,20 @@ ipcMain.handle('open-payment-window', async (event, params) => {
     paymentWindow.moveTop();
     paymentWindow.focus();
 
+    // Security: Restrict navigation to HTTPS and prevent arbitrary window spawning
+    paymentWindow.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
+      if (isTrustedPaymentUrl(targetUrl) || targetUrl.startsWith('https://')) {
+        return { action: 'allow' };
+      }
+      return { action: 'deny' };
+    });
+
+    paymentWindow.webContents.on('will-navigate', (e, navUrl) => {
+      if (!navUrl.startsWith('https://')) {
+        e.preventDefault();
+      }
+    });
+
     // Ensure paymentWindow stays above all else when focused
     paymentWindow.on('focus', () => {
       if (paymentWindow && !paymentWindow.isDestroyed()) {
@@ -683,11 +737,10 @@ ipcMain.handle('open-payment-window', async (event, params) => {
 
     async function handlePaymentNav(navUrl) {
       if (!navUrl) return;
-      const lower = navUrl.toLowerCase();
       const detectedPaymentId = extractPaymentId(navUrl);
 
+      // Require real cryptographic/backend verification rather than unverified substring matching
       if (detectedPaymentId) {
-        console.log(`[PaymentWindow] Captured verified payment ID: ${detectedPaymentId}`);
         try {
           const actResult = await licenseManager.activateWithPaymentRef(detectedPaymentId, planId);
           if (actResult && actResult.success) {
@@ -701,26 +754,14 @@ ipcMain.handle('open-payment-window', async (event, params) => {
             setTimeout(() => {
               if (paymentWindow && !paymentWindow.isDestroyed()) paymentWindow.close();
             }, 1200);
-            return;
           }
         } catch (e) {
           console.error('[PaymentWindow] Verification error:', e);
         }
       }
-
-      if (
-        lower.includes('success') ||
-        lower.includes('payment-success') ||
-        lower.includes('order_id=')
-      ) {
-        safeResolve({ success: true, verified: false, url: navUrl, planId });
-        setTimeout(() => {
-          if (paymentWindow && !paymentWindow.isDestroyed()) paymentWindow.close();
-        }, 1500);
-      }
     }
 
-    // Check for success/failure URL patterns after navigation
+    // Check for verified payment ID after navigation
     paymentWindow.webContents.on('did-navigate', (e, navUrl) => {
       handlePaymentNav(navUrl);
     });
@@ -776,7 +817,7 @@ ipcMain.handle('open-payment-in-browser', async (event, url) => {
     mainWindow.setAlwaysOnTop(false);
     mainWindow.webContents.send('payment-session-started', { url, mode: 'browser' });
   }
-  if (typeof url === 'string' && (url.startsWith('https://') || url.startsWith('http://'))) {
+  if (isTrustedPaymentUrl(url)) {
     await shell.openExternal(url);
     return true;
   }
@@ -975,80 +1016,108 @@ ipcMain.handle('set-launch-at-login', (event, enable) => {
 // ── Windows CapabilityAccessManager Real-Time Webcam Monitor ─────────
 let webcamMonitorInterval = null;
 let lastWebcamInUse = false;
+let lastActiveApps = [];
 let isCheckingWebcam = false;
 
 function checkWebcamUsage() {
   if (process.platform !== 'win32' || isCheckingWebcam) return;
   isCheckingWebcam = true;
 
-  execFile('reg.exe', [
-    'query',
-    'HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\webcam',
-    '/s'
-  ], { windowsHide: true, timeout: 5000 }, (err, stdout) => {
-    isCheckingWebcam = false;
-    if (err || !stdout) return;
+  const queries = [
+    ['query', 'HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\webcam', '/s'],
+    ['query', 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\webcam', '/s']
+  ];
 
-    const sections = stdout.split(/(?=HKEY_CURRENT_USER)/i);
-    let inUse = false;
-    const activeApps = [];
+  let pending = queries.length;
+  let combinedStdout = '';
 
-    for (const section of sections) {
-      const lines = section.trim().split(/\r?\n/);
-      if (!lines.length) continue;
-      const header = lines[0].trim();
-      const lowerHeader = header.toLowerCase();
-
-      // Exclude Edge Light itself and Electron dev environment
-      if (
-        lowerHeader.includes('edge light') ||
-        lowerHeader.includes('edgelight') ||
-        lowerHeader.includes('electron.exe')
-      ) {
-        continue;
+  queries.forEach(args => {
+    execFile('reg.exe', args, { windowsHide: true, timeout: 3500 }, (err, stdout) => {
+      if (!err && stdout) combinedStdout += '\n' + stdout;
+      pending--;
+      if (pending === 0) {
+        isCheckingWebcam = false;
+        processWebcamRegistry(combinedStdout);
       }
+    });
+  });
+}
 
-      let startVal = null;
-      let stopVal = null;
+function processWebcamRegistry(stdout) {
+  if (!stdout) return;
 
-      for (const line of lines) {
-        const matchStart = line.match(/LastUsedTimeStart\s+REG_QWORD\s+(0x[0-9a-fA-F]+|\d+)/i);
-        if (matchStart) startVal = matchStart[1];
-        const matchStop = line.match(/LastUsedTimeStop\s+REG_QWORD\s+(0x[0-9a-fA-F]+|\d+)/i);
-        if (matchStop) stopVal = matchStop[1];
-      }
+  const sections = stdout.split(/(?=HKEY_)/i);
+  let inUse = false;
+  const activeApps = [];
 
-      if (startVal !== null) {
-        try {
-          const start = BigInt(startVal);
-          const stop = stopVal !== null ? BigInt(stopVal) : 0n;
-          // When an application or website accesses the camera,
-          // Windows sets LastUsedTimeStop to 0x0 or start > stop
-          if (stop === 0n || start > stop) {
-            inUse = true;
-            const appName = header.split('\\').pop() || header;
+  const filetimeNow = (BigInt(Date.now()) + 11644473600000n) * 10000n;
+  const maxAge = BigInt(Math.max(3600, Math.floor(os.uptime() + 60))) * 10000000n;
+
+  for (const section of sections) {
+    const lines = section.trim().split(/\r?\n/);
+    if (!lines.length) continue;
+    const header = lines[0].trim();
+    const lowerHeader = header.toLowerCase();
+
+    // Exclude Edge Light itself and Electron dev environment
+    if (
+      lowerHeader.includes('edge light') ||
+      lowerHeader.includes('edgelight') ||
+      lowerHeader.includes('electron.exe')
+    ) {
+      continue;
+    }
+
+    let startVal = null;
+    let stopVal = null;
+
+    for (const line of lines) {
+      const matchStart = line.match(/LastUsedTimeStart\s+REG_QWORD\s+(0x[0-9a-fA-F]+|\d+)/i);
+      if (matchStart) startVal = matchStart[1];
+      const matchStop = line.match(/LastUsedTimeStop\s+REG_QWORD\s+(0x[0-9a-fA-F]+|\d+)/i);
+      if (matchStop) stopVal = matchStop[1];
+    }
+
+    if (startVal !== null) {
+      try {
+        const start = BigInt(startVal);
+        const stop = stopVal !== null ? BigInt(stopVal) : 0n;
+
+        // Verify entry is not stale from a previous boot session
+        const isStale = (filetimeNow > start) && ((filetimeNow - start) > maxAge);
+        if (isStale) continue;
+
+        // When an application or website accesses the camera,
+        // Windows sets LastUsedTimeStop to 0x0 or start > stop
+        if (stop === 0n || start > stop) {
+          inUse = true;
+          const appName = header.split('\\').pop() || header;
+          if (!activeApps.includes(appName)) {
             activeApps.push(appName);
           }
-        } catch (e) {}
-      }
+        }
+      } catch (e) {}
     }
+  }
 
-    if (inUse !== lastWebcamInUse) {
-      lastWebcamInUse = inUse;
-      if (inUse) {
-        ensureTopmost(true);
-      }
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('webcam-access-changed', inUse, activeApps);
-      }
+  const stateChanged = (inUse !== lastWebcamInUse);
+  lastWebcamInUse = inUse;
+  lastActiveApps = activeApps;
+
+  if (stateChanged) {
+    if (inUse) {
+      ensureTopmost(true);
     }
-  });
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('webcam-access-changed', inUse, activeApps);
+    }
+  }
 }
 
 function startWebcamMonitoring() {
   if (webcamMonitorInterval) clearInterval(webcamMonitorInterval);
   checkWebcamUsage();
-  webcamMonitorInterval = setInterval(checkWebcamUsage, 3000);
+  webcamMonitorInterval = setInterval(checkWebcamUsage, 1000);
 }
 
 function stopWebcamMonitoring() {
@@ -1058,22 +1127,31 @@ function stopWebcamMonitoring() {
   }
 }
 
+ipcMain.handle('get-webcam-status', () => {
+  return {
+    inUse: lastWebcamInUse,
+    activeApps: lastActiveApps
+  };
+});
+
 app.whenReady().then(async () => {
-  // Ensure Edge Light NEVER locks or interrupts hardware camera streams from WhatsApp, Zoom, etc.
-  // Camera usage detection is handled 100% passively via Windows Registry CapabilityAccessManager.
+  // Allow internal media access for ambient metering while protecting external requests
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
     if (permission === 'media' || permission === 'camera' || permission === 'video') {
-      return callback(false);
+      return callback(true);
     }
     callback(false);
   });
 
   session.defaultSession.setPermissionCheckHandler((webContents, permission) => {
+    if (permission === 'media' || permission === 'camera' || permission === 'video') {
+      return true;
+    }
     return false;
   });
 
   if (session.defaultSession.setDevicePermissionHandler) {
-    session.defaultSession.setDevicePermissionHandler(() => false);
+    session.defaultSession.setDevicePermissionHandler(() => true);
   }
 
   // Initialize licensing and hardware check

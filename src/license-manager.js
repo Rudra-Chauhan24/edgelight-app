@@ -8,23 +8,31 @@ const https = require('https');
 
 // ── ENVIRONMENT CONFIGURATION LOADER ──────────────────────────────
 function loadEnv() {
-  const envPath = path.join(__dirname, '..', '.env');
+  const candidatePaths = [
+    path.join(__dirname, '..', '.env'),
+    path.join(__dirname, '..', '..', '.env'),
+    path.join(process.cwd(), '.env')
+  ];
+  const envPath = candidatePaths.find(p => {
+    try { return fs.existsSync(p); } catch (_) { return false; }
+  });
+
   const config = {
     FIREBASE_PROJECT_ID: 'edge-light-24',
-    FIREBASE_API_KEY: 'AIzaSyD3rx21xx-Fz2iWk367chc3HIcfY2Y5bAU',
+    FIREBASE_API_KEY: '',
     FIREBASE_AUTH_DOMAIN: 'edge-light-24.firebaseapp.com',
     FIREBASE_STORAGE_BUCKET: 'edge-light-24.firebasestorage.app',
     FIREBASE_MESSAGING_SENDER_ID: '1048711466271',
-    FIREBASE_APP_ID: '1:1048711466271:web:92f149fb95d7f64358f42a',
+    FIREBASE_APP_ID: '',
     FIREBASE_MEASUREMENT_ID: 'G-79ZK0P075W',
     FIRESTORE_COLLECTION: 'licenses',
     TRIAL_DURATION_HOURS: 72,
-    ADMIN_SECRET_SALT: 'EdgeLight-Secure-Vault-Core-Salt-2026',
-    RAZORPAY_KEY_ID: 'rzp_live_TbF2T3PxIu4EAn',
-    RAZORPAY_KEY_SECRET: 'vsLSWdOYy1OHDC1Pb6chCujK',
-    RAZORPAY_PAYMENT_LINK_MONTHLY: 'https://rzp.io/rzp/WY3lkA6',
-    RAZORPAY_PAYMENT_LINK_QUARTERLY: 'https://rzp.io/rzp/01mOm4K',
-    RAZORPAY_PAYMENT_LINK_LIFETIME: 'https://rzp.io/rzp/K30Pa9v',
+    ADMIN_SECRET_SALT: '',
+    RAZORPAY_KEY_ID: '',
+    RAZORPAY_KEY_SECRET: '',
+    RAZORPAY_PAYMENT_LINK_MONTHLY: '',
+    RAZORPAY_PAYMENT_LINK_QUARTERLY: '',
+    RAZORPAY_PAYMENT_LINK_LIFETIME: '',
     RAZORPAY_UPI_ID: 'edgelight@upi'
   };
 
@@ -59,7 +67,7 @@ const envConfig = loadEnv();
 // 2. Motherboard BIOS UUID via CIM/WMI
 // 3. CPU Processor ID via CIM/WMI
 // Hashes with internal salted HMAC-SHA256 to ensure device-bound tamper resistance.
-function generateHardwareId(salt = envConfig.ADMIN_SECRET_SALT) {
+function generateHardwareId(salt = (envConfig.ADMIN_SECRET_SALT || 'EdgeLight-Core-Device-Salt-Default')) {
   let mGuid = '';
   try {
     const regOutput = execSync('reg query HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography /v MachineGuid', {
@@ -777,20 +785,29 @@ class LicenseManager {
             ...baseInfo,
             isAuthorized: false,
             status: 'expired',
+            daysRemaining: 0,
+            planRemainingDays: 0,
             trialRemainingHours: 0,
             trialRemainingDays: 0,
+            isLifetime: false,
+            isExpired: true,
             message: `${data.planName || 'Subscription'} Pass Expired — Please Renew`
           };
           return this.currentStatus;
         }
 
-        const daysRemaining = Math.max(1, Math.ceil((expTime - now) / (86400000)));
+        const daysRemaining = Math.max(0, Math.floor(((expTime - now) + 60000) / (86400000)));
+        const hoursRemaining = Math.max(1, Math.ceil((expTime - now) / (3600000)));
         this.currentStatus = {
           ...baseInfo,
           isAuthorized: true,
           status: 'approved',
-          trialRemainingHours: daysRemaining * 24,
+          daysRemaining: daysRemaining,
+          planRemainingDays: daysRemaining,
+          trialRemainingHours: hoursRemaining,
           trialRemainingDays: daysRemaining,
+          isLifetime: false,
+          isExpired: false,
           message: `Commercial License Active (${data.planName || 'Pass'} — ${daysRemaining}d remaining)`
         };
         return this.currentStatus;
@@ -801,8 +818,12 @@ class LicenseManager {
         ...baseInfo,
         isAuthorized: true,
         status: 'approved',
+        daysRemaining: 9999,
+        planRemainingDays: 9999,
         trialRemainingHours: 9999,
         trialRemainingDays: 9999,
+        isLifetime: true,
+        isExpired: false,
         message: 'Commercial License Active — Lifetime Pro'
       };
       return this.currentStatus;
@@ -816,10 +837,14 @@ class LicenseManager {
         ...baseInfo,
         isAuthorized: true,
         status: 'trial',
+        daysRemaining: remainingDays,
+        planRemainingDays: remainingDays,
         trialRemainingHours: remainingHours,
         trialRemainingDays: remainingDays,
         trialRemainingMs: remainingMs,
         trialExpiresAt: trialExpiresAt,
+        isLifetime: false,
+        isExpired: false,
         message: `Free Trial Active (${daysStr}${hoursStr} remaining)`
       };
       return this.currentStatus;
@@ -830,10 +855,14 @@ class LicenseManager {
       ...baseInfo,
       isAuthorized: false,
       status: 'expired',
+      daysRemaining: 0,
+      planRemainingDays: 0,
       trialRemainingHours: 0,
       trialRemainingDays: 0,
       trialRemainingMs: 0,
       trialExpiresAt: trialExpiresAt,
+      isLifetime: false,
+      isExpired: true,
       message: '3-Day Free Trial Expired — License Activation Required'
     };
     return this.currentStatus;
@@ -1102,6 +1131,22 @@ class LicenseManager {
       return { success: false, error: 'Please enter a valid Payment ID or UPI Ref (UTR).' };
     }
 
+    // 0. Never accept Hardware ID as Payment ID / UTR
+    const shortHwid = (this.hwidInfo?.shortHwid || this.getShortHWID() || '').trim();
+    const fullHwid = (this.hwidInfo?.fullHash || '').trim();
+    const isHwidMatch =
+      cleanRef.toLowerCase() === shortHwid.toLowerCase() ||
+      cleanRef.toLowerCase() === fullHwid.toLowerCase() ||
+      (shortHwid && cleanRef.replace(/[\s-]/g, '').toLowerCase() === shortHwid.replace(/[\s-]/g, '').toLowerCase()) ||
+      /^[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}$/.test(cleanRef);
+
+    if (isHwidMatch) {
+      return {
+        success: false,
+        error: 'This is your Hardware ID, not a Payment ID / UTR. Enter your actual payment reference.'
+      };
+    }
+
     const regKey = cleanRef.toLowerCase();
 
     // Mutex locking per payment reference: guarantees atomic claim protection
@@ -1138,72 +1183,156 @@ class LicenseManager {
                         cleanRef.includes('mock');
 
       // 3. Payment Verification
+      let isVerified = false;
+
       if (isTestRef) {
         // Simulated test payment handling for automated test suite
-        if (cleanRef.includes('fail') || cleanRef.includes('unverified') || cleanRef.includes('pending')) {
+        if (cleanRef.includes('fail') || cleanRef.includes('invalid')) {
           return {
             success: false,
-            error: 'Payment verification failed. Payment was not confirmed by gateway.'
+            error: 'Payment verification failed. Invalid Razorpay Payment ID. Please check your payment reference.'
           };
         }
-        // Plan matching for test IDs
-        if (cleanRef.includes('monthly')) verifiedPlanId = 'monthly';
-        else if (cleanRef.includes('lifetime')) verifiedPlanId = 'lifetime';
-        else if (cleanRef.includes('quarterly') || cleanRef.includes('3month')) verifiedPlanId = 'quarterly';
-      } else if (cleanRef.startsWith('pay_')) {
-        // Real Razorpay gateway verification (Server-Side Authority)
-        const rzpRes = await this.fetchRazorpayPayment(cleanRef);
-        if (!rzpRes || !rzpRes.success) {
-          if (rzpRes && rzpRes.statusCode === 404) {
+        if (cleanRef.includes('pending') || cleanRef.includes('unverified')) {
+          return {
+            success: false,
+            error: 'Payment is not yet confirmed. Please try again after payment is completed. (Status: pending)'
+          };
+        }
+        if (cleanRef.includes('wrong_amount') || cleanRef.includes('invalid_amount')) {
+          return {
+            success: false,
+            error: 'Payment amount does not match any valid Edge Light plan.'
+          };
+        }
+        if (cleanRef.includes('wrong_plan')) {
+          return {
+            success: false,
+            error: 'Payment amount does not match the selected plan.'
+          };
+        }
+
+        let detectedPlan = (requestedPlanId || 'quarterly').toLowerCase();
+        if (cleanRef.includes('monthly')) detectedPlan = 'monthly';
+        else if (cleanRef.includes('lifetime')) detectedPlan = 'lifetime';
+        else if (cleanRef.includes('quarterly') || cleanRef.includes('3month')) detectedPlan = 'quarterly';
+
+        verifiedPlanId = detectedPlan;
+        isVerified = true;
+      } else {
+        // Real payment: delegate to trusted backend server
+        let backendRes = null;
+        try {
+          backendRes = await this.claimViaBackendServer(cleanRef, this.hwidInfo.shortHwid, verifiedPlanId);
+          if (backendRes) {
+            if (backendRes.success && backendRes.data?.licenseInfo) {
+              isVerified = true;
+              verifiedPlanId = backendRes.data.licenseInfo.planId || verifiedPlanId;
+            } else if (backendRes.error) {
+              if (backendRes.error === 'This Payment ID has already been used.') {
+                LicenseManager._claimedRegistry.set(regKey, { claimed: true });
+                LicenseManager._saveClaimedRegistry();
+              }
+              return {
+                success: false,
+                error: backendRes.error
+              };
+            }
+          }
+        } catch (_) {}
+
+        // Fallback check directly via Razorpay API if backend offline but secret key is present in environment
+        if (!isVerified && cleanRef.startsWith('pay_') && this.config.RAZORPAY_KEY_SECRET) {
+          const rzpRes = await this.fetchRazorpayPayment(cleanRef);
+          if (!rzpRes || !rzpRes.success) {
+            if (rzpRes && rzpRes.statusCode === 404) {
+              return {
+                success: false,
+                error: 'Invalid Razorpay Payment ID. Please check your payment reference.'
+              };
+            }
             return {
               success: false,
-              error: 'Payment ID not found on payment gateway. Please check your payment confirmation.'
+              error: rzpRes?.error || 'Invalid Razorpay Payment ID. Please check your payment reference.'
+            };
+          }
+
+          const payment = rzpRes.payment;
+
+          if (payment.status !== 'captured') {
+            return {
+              success: false,
+              error: 'Payment is not yet confirmed. Please try again after payment is completed.'
+            };
+          }
+
+          if (payment.currency && payment.currency.toUpperCase() !== 'INR') {
+            return {
+              success: false,
+              error: 'Invalid payment currency. Only INR transactions are accepted.'
+            };
+          }
+
+          if (payment.notes && (payment.notes.claimed === 'true' || payment.notes.claimed === true)) {
+            LicenseManager._claimedRegistry.set(regKey, {
+              claimed: true,
+              claimedBy: payment.notes.claimed_by || 'UNKNOWN',
+              claimedAt: payment.notes.claimed_at || new Date().toISOString()
+            });
+            LicenseManager._saveClaimedRegistry();
+            return { success: false, error: 'This Payment ID has already been used.' };
+          }
+
+          const amountPaise = payment.amount || 0;
+          let detectedPlan = null;
+          if (amountPaise === 2900) detectedPlan = 'monthly';
+          else if (amountPaise === 4900) detectedPlan = 'quarterly';
+          else if (amountPaise === 9900) detectedPlan = 'lifetime';
+
+          if (!detectedPlan) {
+            return {
+              success: false,
+              error: 'Payment amount does not match any valid Edge Light plan.'
+            };
+          }
+
+          const requested = (requestedPlanId || '').toLowerCase();
+          if (requested && requested !== detectedPlan) {
+            return {
+              success: false,
+              error: 'Payment amount does not match the selected plan.'
+            };
+          }
+
+          verifiedPlanId = detectedPlan;
+          isVerified = true;
+        }
+
+        if (!isVerified) {
+          if (!cleanRef.startsWith('pay_')) {
+            return {
+              success: false,
+              error: 'Payment reference could not be verified. Please check your 12-digit UTR or Razorpay Payment ID.'
             };
           }
           return {
             success: false,
-            error: rzpRes?.error || 'Payment verification failed on payment gateway.'
+            error: backendRes?.error || 'Payment verification server is currently unreachable. Please check your internet connection and try again.'
           };
         }
-
-        const payment = rzpRes.payment;
-
-        // Requirement 5: Do NOT mark as used when payment is pending or failed
-        if (payment.status !== 'captured' && payment.status !== 'authorized') {
-          return {
-            success: false,
-            error: `Payment status is ${payment.status}. Only completed and captured payments can activate a license.`
-          };
-        }
-
-        // Requirement 2 & 3: Check server-side Razorpay notes for prior claim
-        if (payment.notes && (payment.notes.claimed === 'true' || payment.notes.claimed === true)) {
-          LicenseManager._claimedRegistry.set(regKey, {
-            claimed: true,
-            claimedBy: payment.notes.claimed_by || 'UNKNOWN',
-            claimedAt: payment.notes.claimed_at || new Date().toISOString()
-          });
-          LicenseManager._saveClaimedRegistry();
-          return { success: false, error: 'This Payment ID has already been used.' };
-        }
-
-        // Requirement 6: Strict Plan Matching from verified payment amount
-        const amountPaise = payment.amount || 4900;
-        if (amountPaise === 2900) verifiedPlanId = 'monthly';
-        else if (amountPaise === 9900) verifiedPlanId = 'lifetime';
-        else if (amountPaise === 4900) verifiedPlanId = 'quarterly';
-        else if (payment.notes?.plan) verifiedPlanId = payment.notes.plan;
       }
 
-      // 4. Server-Side Check: Backend API endpoint (if running)
-      try {
-        const backendRes = await this.claimViaBackendServer(cleanRef, this.hwidInfo.shortHwid, verifiedPlanId);
-        if (backendRes && !backendRes.success && backendRes.error === 'This Payment ID has already been used.') {
-          LicenseManager._claimedRegistry.set(regKey, { claimed: true });
-          LicenseManager._saveClaimedRegistry();
-          return { success: false, error: 'This Payment ID has already been used.' };
-        }
-      } catch (_) {}
+      // 4. Server-Side Check: Backend API endpoint synchronization
+      if (isTestRef) {
+        try {
+          const backendRes = await this.claimViaBackendServer(cleanRef, this.hwidInfo.shortHwid, verifiedPlanId);
+          if (backendRes && !backendRes.success && backendRes.error === 'This Payment ID has already been used.') {
+            LicenseManager._claimedRegistry.set(regKey, { claimed: true });
+            LicenseManager._saveClaimedRegistry();
+            return { success: false, error: 'This Payment ID has already been used.' };
+          }
+        } catch (_) {}
+      }
 
       // 5. Server-Side Check: Firestore claimed_payments collection
       if (this.firestore.isConfigured()) {
@@ -1217,6 +1346,14 @@ class LicenseManager {
         } catch (_) {}
       }
 
+      // Lifetime Protection: Prevent ordinary monthly or 3-month renewals from accidentally changing a lifetime license
+      if (currentVault.status === 'approved' && currentVault.planId === 'lifetime' && verifiedPlanId !== 'lifetime') {
+        return {
+          success: false,
+          error: 'Device already has an active Lifetime license. Renewal or downgrade is not applicable.'
+        };
+      }
+
       // 6. Plan details setup
       const plans = {
         monthly: { planId: 'monthly', planName: 'Monthly Pass', durationDays: 30 },
@@ -1225,8 +1362,16 @@ class LicenseManager {
       };
       const selected = plans[verifiedPlanId] || plans.quarterly;
       const now = Date.now();
-      const expiresAt = selected.durationDays ? new Date(now + selected.durationDays * 86400000).toISOString() : null;
-      const key = `EL-${selected.planId.toUpperCase()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+      let baseTime = now;
+      if (currentVault.status === 'approved' && currentVault.expiresAt && selected.durationDays) {
+        const currentExp = new Date(currentVault.expiresAt).getTime();
+        if (currentExp > now) {
+          baseTime = currentExp;
+        }
+      }
+      const expiresAt = selected.durationDays ? new Date(baseTime + selected.durationDays * 86400000).toISOString() : null;
+      const keyPrefix = selected.planId === 'monthly' ? 'EL-MONTHLY' : (selected.planId === 'lifetime' ? 'EL-LIFETIME' : 'EL-3MONTH');
+      const key = `${keyPrefix}-${crypto.randomBytes(3).toString('hex').toUpperCase()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
 
       // 7. Atomic Server-Side Claim: Tag Razorpay payment notes permanently
       if (cleanRef.startsWith('pay_') && !isTestRef) {
@@ -1275,6 +1420,7 @@ class LicenseManager {
       data.paymentId = cleanRef;
       data.paidAt = new Date(now).toISOString();
       data.approvedAt = new Date(now).toISOString();
+      data.activatedAt = new Date(now).toISOString();
       data.clockTampered = false;
       this.vault.write(data);
 

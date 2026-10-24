@@ -48,7 +48,7 @@ class AppUpdater {
 
       const req = client.get(url, {
         headers: {
-          'User-Agent': 'EdgeLight-Desktop-Updater/' + (app?.getVersion ? app.getVersion() : '1.0.14'),
+          'User-Agent': 'EdgeLight-Desktop-Updater/' + (app?.getVersion ? app.getVersion() : '1.0.15'),
           'Accept': 'application/json'
         },
         timeout: 15000
