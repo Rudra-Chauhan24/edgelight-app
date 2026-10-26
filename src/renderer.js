@@ -83,7 +83,7 @@
   let currentWebcamInUse = false;
 
   // ── Automatic Human Face Presence Detection State ──────────────────
-  let autoFaceEnabled = true;
+  let autoFaceEnabled = false;
   let wasTurnedOnByFace = false;
   let manualTurnedOffWhileFaceActive = false;
   let userCustomizedBrightness = false;
@@ -1915,7 +1915,8 @@
     faceDetector = new FacePresenceDetector({
       consecutiveRequired: 3,
       gracePeriodMs: 3000,
-      sampleIntervalMs: 140
+      sampleIntervalMs: 140,
+      enabled: false
     });
 
     faceDetector.onFaceStateChange = (isPresent, info) => {
