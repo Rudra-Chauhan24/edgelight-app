@@ -1,4 +1,4 @@
-const { app, BrowserWindow, screen, ipcMain, Tray, Menu, nativeImage, globalShortcut, session, clipboard, shell } = require('electron');
+const { app, BrowserWindow, screen, ipcMain, Tray, Menu, nativeImage, globalShortcut, session, clipboard, shell, powerMonitor } = require('electron');
 const { execFile } = require('child_process');
 const path = require('path');
 const os = require('os');
@@ -10,6 +10,16 @@ const { AppUpdater } = require('./updater');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
 app.commandLine.appendSwitch('enable-gpu-rasterization');
 app.commandLine.appendSwitch('enable-zero-copy');
+
+// Ensure consistent persistent userData across portable and installed executions
+try {
+  const currentAppPath = app.getPath('userData');
+  const isTempPath = /\\temp\\|\\tmp\\/i.test(currentAppPath);
+  if (isTempPath && process.env.APPDATA) {
+    const persistentUserData = path.join(process.env.APPDATA, 'EdgeLight');
+    app.setPath('userData', persistentUserData);
+  }
+} catch (_) {}
 
 // ── INTERNET CONNECTIVITY MONITOR ─────────────────────────────────
 let isOnline = true;
@@ -441,7 +451,10 @@ function createWindow() {
   });
 
   mainWindow.once('ready-to-show', () => {
-    mainWindow.show();
+    // Show overlay window without stealing keyboard focus from active apps
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.showInactive();
+    }
     startKeepTop();
     startCursorTracker();
 
@@ -474,12 +487,33 @@ function createWindow() {
     }, 15 * 60 * 1000);
   });
 
+  // Helper to resolve active display for current window or cursor
+  const getActiveDisplay = () => {
+    try {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        const curBounds = mainWindow.getBounds();
+        const display = screen.getDisplayMatching(curBounds);
+        if (display) return display;
+      }
+    } catch (_) {}
+    return screen.getPrimaryDisplay();
+  };
+
   // Handle display resolution, scaling, or monitor connect/disconnect changes
   const handleDisplayChange = () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
-      const bounds = screen.getPrimaryDisplay().bounds;
+      const display = getActiveDisplay();
+      const bounds = display.bounds;
       mainWindow.setBounds(bounds);
       ensureTopmost();
+      try {
+        mainWindow.webContents.send('display-configuration-changed', {
+          bounds: display.bounds,
+          workArea: display.workArea,
+          scaleFactor: display.scaleFactor,
+          displayId: display.id
+        });
+      } catch (_) {}
     }
   };
 
@@ -525,6 +559,51 @@ function registerShortcuts() {
 // IPC Handlers
 ipcMain.handle('get-license-info', () => {
   return licenseManager.getStatus();
+});
+
+ipcMain.handle('verify-hardware-id', async (event, inputHwid) => {
+  try {
+    return await licenseManager.verifyHardwareId(inputHwid);
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('get-display-info', () => {
+  try {
+    const primary = screen.getPrimaryDisplay();
+    let active = primary;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      active = screen.getDisplayMatching(mainWindow.getBounds()) || primary;
+    }
+    const all = screen.getAllDisplays().map(d => ({
+      id: d.id,
+      bounds: d.bounds,
+      workArea: d.workArea,
+      scaleFactor: d.scaleFactor,
+      isPrimary: d.id === primary.id
+    }));
+    return {
+      activeDisplay: {
+        id: active.id,
+        bounds: active.bounds,
+        workArea: active.workArea,
+        scaleFactor: active.scaleFactor
+      },
+      displays: all
+    };
+  } catch (e) {
+    const primary = screen.getPrimaryDisplay();
+    return {
+      activeDisplay: {
+        id: primary.id,
+        bounds: primary.bounds,
+        workArea: primary.workArea,
+        scaleFactor: primary.scaleFactor
+      },
+      displays: []
+    };
+  }
 });
 
 ipcMain.handle('refresh-license-info', async () => {
@@ -837,6 +916,23 @@ ipcMain.handle('activate-payment-ref', async (event, params) => {
   }
 });
 
+ipcMain.handle('activate-admin-lifetime', async (event, params) => {
+  try {
+    const token = typeof params === 'string' ? params : params?.adminToken;
+    const identity = typeof params === 'object' ? params?.adminIdentity : null;
+    if (!token || typeof token !== 'string') {
+      return { success: false, error: 'Admin authorization token is required.' };
+    }
+    const res = await licenseManager.activateAdminLifetime(token, identity);
+    if (res && res.success && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('license-status-changed', res.licenseInfo);
+    }
+    return res;
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
 ipcMain.handle('get-connectivity-status', () => {
   return {
     isOnline,
@@ -948,12 +1044,16 @@ ipcMain.on('set-ignore-mouse-events', (event, ignore, options) => {
   }
 });
 
-ipcMain.on('bring-to-front', (event) => {
+ipcMain.on('bring-to-front', (event, shouldFocus = false) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (win && !win.isDestroyed()) {
-    win.setAlwaysOnTop(true, 'screen-saver', 1);
+    if (!win.isAlwaysOnTop()) {
+      win.setAlwaysOnTop(true, 'screen-saver', 1);
+    }
     win.moveTop();
-    win.focus();
+    if (shouldFocus) {
+      win.focus();
+    }
   }
 });
 
@@ -1169,7 +1269,34 @@ app.whenReady().then(async () => {
   registerShortcuts();
   startWebcamMonitoring();
   startConnectivityMonitor();
-  setLaunchAtLogin(true);
+
+  // Handle Windows Sleep / Suspend / Resume gracefully
+  if (powerMonitor) {
+    powerMonitor.on('suspend', () => {
+      stopWebcamMonitoring();
+      stopCursorTracker();
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('system-suspend');
+      }
+    });
+
+    powerMonitor.on('resume', () => {
+      setTimeout(() => {
+        handleDisplayChange();
+        startWebcamMonitoring();
+        startCursorTracker();
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('system-resume');
+        }
+      }, 1500);
+    });
+  }
+
+  // Preserve user Windows startup setting without forcing changes silently
+  const currentStartupSetting = getLaunchAtLogin();
+  if (currentStartupSetting) {
+    setLaunchAtLogin(true);
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

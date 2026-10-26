@@ -22,6 +22,8 @@
   const autoSwitch = document.getElementById('autoSwitch');
   const autoLabel = document.getElementById('autoLabel');
   const autoSwitchWrap = document.getElementById('autoSwitchWrap');
+  const autoFaceSwitch = document.getElementById('autoFaceSwitch');
+  const faceStatusHint = document.getElementById('faceStatusHint');
   const thresholdInput = document.getElementById('threshold');
   const thresholdVal = document.getElementById('thresholdVal');
   const thresholdWrap = document.getElementById('thresholdWrap');
@@ -79,6 +81,17 @@
   let wasTurnedOnByWebcam = false;
   let manualTurnedOffWhileWebcamActive = false;
   let currentWebcamInUse = false;
+
+  // ── Automatic Human Face Presence Detection State ──────────────────
+  let autoFaceEnabled = true;
+  let wasTurnedOnByFace = false;
+  let manualTurnedOffWhileFaceActive = false;
+  let faceStream = null;
+  let faceVideoEl = null;
+  let faceDetector = null;
+  let faceDetectionLoopActive = false;
+  let faceConsecutiveErrors = 0;
+  let faceRetryTimer = null;
 
   // Smoothly interpolated render values (exponential damping)
   const renderState = {
@@ -197,7 +210,19 @@
   window.__calculateOptimalThickness = calculateOptimalThickness;
   window.__autoAdjustToScreen = autoAdjustToScreen;
 
-  // Resize canvas to match screen resolution
+  function clampBarPosition() {
+    if (!bar) return;
+    const sh = window.innerHeight || 1080;
+    if (sh < 600) {
+      bar.style.padding = '8px 10px';
+      bar.style.gap = '6px';
+    } else {
+      bar.style.padding = '';
+      bar.style.gap = '';
+    }
+  }
+
+  // Resize canvas to match screen resolution and scale factor
   function resize() {
     dpr = window.devicePixelRatio || 1;
     const w = Math.max(100, window.innerWidth || 1920);
@@ -213,12 +238,28 @@
       autoAdjustToScreen(false);
     }
 
+    clampBarPosition();
+
     if (!state.on && renderState.thickScale <= 0.002) {
       clearCanvas();
     } else {
       drawFrame();
     }
   }
+
+  window.addEventListener('resize', resize);
+
+  if (window.edgeLightAPI?.onDisplayConfigurationChanged) {
+    window.edgeLightAPI.onDisplayConfigurationChanged((config) => {
+      resize();
+      autoAdjustToScreen(false);
+      clampBarPosition();
+      requestRender();
+    });
+  }
+
+  // Initial call to ensure instant synchronization with screen geometry on startup
+  try { resize(); } catch (_) {}
 
   // ── COLOR TEMPERATURE ──────────────────────────────────────────────
   // Studio lighting: 0 = 3744K warm white · 0.50 = 5000K neutral white · 1 = 6500K cool daylight.
@@ -724,12 +765,17 @@
       stopAuto();
     }
     const nextState = !state.on;
-    if (!nextState && currentWebcamInUse) {
-      manualTurnedOffWhileWebcamActive = true;
-    } else if (nextState) {
+    if (!nextState) {
+      if (currentWebcamInUse) manualTurnedOffWhileWebcamActive = true;
+      if (faceDetector && faceDetector.isFacePresent()) {
+        manualTurnedOffWhileFaceActive = true;
+      }
+    } else {
       manualTurnedOffWhileWebcamActive = false;
+      manualTurnedOffWhileFaceActive = false;
     }
     wasTurnedOnByWebcam = false;
+    wasTurnedOnByFace = false;
     setOn(nextState);
     power.blur();
     showStatus(state.on ? 'Edge Light On ✨' : 'Edge Light Off', 1800);
@@ -846,6 +892,7 @@
   let isInteractingWithDock = false;
   let clickThroughState = true;
   let isPaymentSessionOpen = false;
+  let wasBarVisibleBeforePayment = false;
 
   function isAnyModalOpen() {
     const licModal = licenseModal || document.getElementById('license-modal');
@@ -877,7 +924,8 @@
     }
   }
 
-  function showDock() {
+  function showDock(force = false) {
+    if (isPaymentSessionOpen && !force) return;
     try { tickCountdown(); } catch (_) {}
     bar.classList.add('visible');
     hoverZone.classList.add('dock-open');
@@ -979,16 +1027,18 @@
   });
 
   hoverZone.addEventListener('mouseenter', () => {
-    showDock();
+    if (!isPaymentSessionOpen) showDock();
   });
 
   hoverZone.addEventListener('mousemove', () => {
-    showDock();
+    if (!isPaymentSessionOpen) showDock();
   });
 
   bar.addEventListener('focusin', () => {
-    showDock();
-    setClickThrough(false);
+    if (!isPaymentSessionOpen) {
+      showDock();
+      setClickThrough(false);
+    }
   });
 
   bar.addEventListener('focusout', () => {
@@ -1099,7 +1149,7 @@
 
       // Only reveal dock when dock is hidden and mouse touches the right edge summon trigger
       // (within 20px of right screen edge and within 240px of vertical center)
-      if (!isBarVisible) {
+      if (!isBarVisible && !isPaymentSessionOpen) {
         const isNearRightEdge = e.clientX > (window.innerWidth - 20) &&
           Math.abs(e.clientY - window.innerHeight / 2) < 240;
 
@@ -1169,6 +1219,7 @@
     });
 
     window.edgeLightAPI.onToggleControls?.(() => {
+      if (isPaymentSessionOpen) return;
       if (bar.classList.contains('visible')) {
         forceHideDock();
       } else {
@@ -1731,7 +1782,217 @@
     }
   });
 
-  window.addEventListener('beforeunload', stopAuto);
+  // ── Face Presence Detection Architecture & Camera Lifecycle ─────
+  if (typeof FacePresenceDetector !== 'undefined') {
+    faceDetector = new FacePresenceDetector({
+      consecutiveRequired: 3,
+      gracePeriodMs: 3000,
+      sampleIntervalMs: 140
+    });
+
+    faceDetector.onFaceStateChange = (isPresent, info) => {
+      if (faceStatusHint) {
+        if (isPresent) {
+          faceStatusHint.textContent = '👤 Face detected (active)';
+          faceStatusHint.classList.add('detected');
+        } else {
+          faceStatusHint.textContent = '👤 Waiting for face…';
+          faceStatusHint.classList.remove('detected');
+        }
+      }
+
+      if (!autoFaceEnabled) return;
+
+      if (isPresent) {
+        if (!manualTurnedOffWhileFaceActive) {
+          if (!state.on) {
+            wasTurnedOnByFace = true;
+            setOn(true);
+            showStatus('👤 Face detected — Edge Light on ✨', 2400);
+          }
+        }
+      } else {
+        // Face has departed and grace period expired without flicker
+        manualTurnedOffWhileFaceActive = false; // Re-arm automatic detection for next arrival
+        if (wasTurnedOnByFace && state.on) {
+          wasTurnedOnByFace = false;
+          setOn(false);
+          showStatus('👤 Face absent — Edge Light off', 2200);
+        }
+      }
+    };
+  }
+
+  async function startFaceDetectionCamera() {
+    if (!autoFaceEnabled || !faceDetector) return;
+    if (faceStream && faceStream.active) return;
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        if (faceStatusHint) faceStatusHint.textContent = '👤 Camera API unavailable';
+        return;
+      }
+
+      // Gentle, low-resolution stream for lightweight local face-presence metering
+      faceStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: 'user',
+          width: { ideal: 160 },
+          height: { ideal: 120 },
+          frameRate: { ideal: 10, max: 15 }
+        },
+        audio: false
+      });
+
+      if (!faceStream || faceStream.getVideoTracks().length === 0) {
+        throw new Error('No active video track');
+      }
+
+      const track = faceStream.getVideoTracks()[0];
+      track.addEventListener('ended', () => {
+        stopFaceDetectionCamera(false);
+      });
+      track.addEventListener('mute', () => {
+        if (faceDetector) faceDetector.reset();
+      });
+
+      if (!faceVideoEl) {
+        faceVideoEl = document.createElement('video');
+        faceVideoEl.id = 'face-detection-video-hidden';
+        faceVideoEl.setAttribute('playsinline', '');
+        faceVideoEl.setAttribute('autoplay', '');
+        faceVideoEl.muted = true;
+        faceVideoEl.defaultMuted = true;
+        faceVideoEl.style.cssText = 'position:fixed;bottom:0;right:0;width:80px;height:60px;opacity:0.001;pointer-events:none;z-index:-9999;';
+        document.body.appendChild(faceVideoEl);
+      }
+
+      faceVideoEl.srcObject = faceStream;
+      await faceVideoEl.play().catch(() => {});
+
+      faceConsecutiveErrors = 0;
+      faceDetectionLoopActive = true;
+      runFaceProcessingLoop();
+
+      if (faceStatusHint) {
+        faceStatusHint.textContent = '👤 Face detection active';
+      }
+    } catch (err) {
+      faceConsecutiveErrors++;
+      if (faceStatusHint) {
+        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+          faceStatusHint.textContent = '👤 Camera permission denied';
+        } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+          faceStatusHint.textContent = '👤 Camera busy (passive app detection active)';
+        } else {
+          faceStatusHint.textContent = '👤 Camera offline (passive app detection active)';
+        }
+      }
+      // Retry politely if under error threshold; do not spin in uncontrolled loop
+      if (faceConsecutiveErrors < 3 && autoFaceEnabled) {
+        clearTimeout(faceRetryTimer);
+        faceRetryTimer = setTimeout(() => {
+          if (autoFaceEnabled && !faceDetectionLoopActive) {
+            startFaceDetectionCamera();
+          }
+        }, 15000);
+      }
+    }
+  }
+
+  async function runFaceProcessingLoop() {
+    if (!faceDetectionLoopActive || !autoFaceEnabled || !faceDetector) return;
+    if (!faceVideoEl || faceVideoEl.readyState < 2) {
+      setTimeout(runFaceProcessingLoop, 150);
+      return;
+    }
+
+    try {
+      await faceDetector.processFrame(faceVideoEl);
+    } catch (_) {}
+
+    if (faceDetectionLoopActive && autoFaceEnabled) {
+      setTimeout(runFaceProcessingLoop, 140);
+    }
+  }
+
+  function stopFaceDetectionCamera(userInitiated = false) {
+    faceDetectionLoopActive = false;
+    clearTimeout(faceRetryTimer);
+    faceRetryTimer = null;
+    if (faceStream) {
+      try {
+        faceStream.getTracks().forEach((t) => t.stop());
+      } catch (_) {}
+      faceStream = null;
+    }
+    if (faceVideoEl) {
+      try {
+        faceVideoEl.srcObject = null;
+        faceVideoEl.remove();
+      } catch (_) {}
+      faceVideoEl = null;
+    }
+    if (faceDetector) {
+      faceDetector.reset();
+    }
+    if (userInitiated) {
+      faceConsecutiveErrors = 0;
+      if (faceStatusHint) {
+        faceStatusHint.textContent = '👤 Auto face activation paused';
+        faceStatusHint.classList.remove('detected');
+      }
+    }
+  }
+
+  function toggleAutoFace() {
+    autoFaceEnabled = !autoFaceEnabled;
+    if (autoFaceSwitch) {
+      autoFaceSwitch.setAttribute('aria-checked', autoFaceEnabled ? 'true' : 'false');
+      autoFaceSwitch.classList.toggle('active', autoFaceEnabled);
+    }
+    if (faceDetector) {
+      faceDetector.setEnabled(autoFaceEnabled);
+    }
+    if (autoFaceEnabled) {
+      showStatus('👤 Auto face activation active ✨', 2000);
+      startFaceDetectionCamera();
+    } else {
+      showStatus('Auto face activation paused', 1800);
+      stopFaceDetectionCamera(true);
+      if (wasTurnedOnByFace && state.on) {
+        wasTurnedOnByFace = false;
+        setOn(false);
+      }
+    }
+  }
+
+  autoFaceSwitch?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleAutoFace();
+  });
+
+  // Power Monitor sleep and resume listeners
+  if (window.edgeLightAPI?.onSystemSuspend) {
+    window.edgeLightAPI.onSystemSuspend(() => {
+      stopFaceDetectionCamera(false);
+    });
+  }
+  if (window.edgeLightAPI?.onSystemResume) {
+    window.edgeLightAPI.onSystemResume(() => {
+      try { resize(); } catch (_) {}
+      try { autoAdjustToScreen(false); } catch (_) {}
+      if (autoFaceEnabled) {
+        setTimeout(() => {
+          startFaceDetectionCamera();
+        }, 1200);
+      }
+    });
+  }
+
+  window.addEventListener('beforeunload', () => {
+    stopAuto();
+    stopFaceDetectionCamera(true);
+  });
 
   // Initialize display
   resize();
@@ -2135,7 +2396,7 @@
     setClickThrough(false);
     licenseModal.classList.add('visible');
     if (window.edgeLightAPI?.bringToFront) {
-      window.edgeLightAPI.bringToFront();
+      window.edgeLightAPI.bringToFront(true);
     }
     startLiveLicenseSync();
   }
@@ -2312,7 +2573,7 @@
     goToWizardStep(initialStep);
     wizardModal?.classList.add('visible');
     if (window.edgeLightAPI?.bringToFront) {
-      window.edgeLightAPI.bringToFront();
+      window.edgeLightAPI.bringToFront(true);
     }
     startLiveLicenseSync();
   }
@@ -2336,6 +2597,7 @@
     hideLicenseModal();
     const existing = document.getElementById('payment-success-overlay');
     if (existing) existing.remove();
+    removePaymentVerificationModal();
 
     // Re-enable the ring/light if user is now licensed
     if (licenseState && licenseState.isAuthorized) {
@@ -2343,7 +2605,7 @@
       power.classList.add('active');
       power.setAttribute('aria-pressed', 'true');
     }
-    showDock();
+    showDock(true);
     showStatus('✨ Edge Light is active & ready!', 3500);
   }
 
@@ -2438,6 +2700,19 @@
   }
 
   async function startPaymentSession(mode = 'browser') {
+    // Prevent duplicate payment sessions, duplicate windows, or repeated navigation
+    if (isPaymentSessionOpen) {
+      if (mode === 'window' && window.edgeLightAPI?.focusPaymentWindow) {
+        window.edgeLightAPI.focusPaymentWindow();
+      }
+      showStatus('⚡ Payment checkout is already active.', 2500);
+      return;
+    }
+
+    // Capture whether floating bar was visible and temporarily hide it so it cannot overlap checkout
+    wasBarVisibleBeforePayment = Boolean(bar && bar.classList.contains('visible'));
+    forceHideDock();
+
     const { url, plan, hwid } = await resolvePaymentUrl();
     activePaymentUrl = url;
     isPaymentSessionOpen = true;
@@ -2454,21 +2729,20 @@
       pollingStatusText.textContent = `⏳ Checkout opened for ₹${plan.price || 49}. Waiting for payment... (checks every 3.5s)`;
     }
 
-    // Inform main process to demote alwaysOnTop so user can view their browser if opened
+    // Inform main process to demote alwaysOnTop so user can view their browser/payment window
     if (window.edgeLightAPI?.startPaymentSession) {
       await window.edgeLightAPI.startPaymentSession();
     }
 
-    // Display the real-time payment flow & timeline modal immediately
-    showPaymentVerificationModal('verifying', {
-      plan,
-      planId: currentSelectedPlanId,
-      url,
-      hwid
-    });
-
     // Open checkout in requested mode
     if (mode === 'browser') {
+      // In browser mode, display the real-time payment flow & timeline modal immediately
+      showPaymentVerificationModal('verifying', {
+        plan,
+        planId: currentSelectedPlanId,
+        url,
+        hwid
+      });
       showStatus(`🌐 Opening checkout in your browser (₹${plan.price || 49})…`, 3500);
       if (window.edgeLightAPI?.openPaymentInBrowser) {
         await window.edgeLightAPI.openPaymentInBrowser(url);
@@ -2477,6 +2751,8 @@
       } else {
         window.open(url, '_blank');
       }
+      // Start polling for activation
+      startPaymentActivationPolling(currentSelectedPlanId);
     } else {
       showStatus(`⚡ Opening secure payment window (₹${plan.price || 49})…`, 3000);
       if (checkoutActiveBanner) checkoutActiveBanner.classList.remove('hidden');
@@ -2485,29 +2761,34 @@
           url,
           planId: currentSelectedPlanId,
           hwid
-        }).then((result) => {
+        }).then(async (result) => {
           if (result && result.success) {
             if (result.verified && result.licenseInfo) {
-              endPaymentSession(false);
+              await endPaymentSession(false);
               showPaymentVerificationModal('verified', result.licenseInfo);
             }
+          } else {
+            // Window closed, cancelled, or not paid
+            await endPaymentSession(true);
           }
-        }).catch(() => {});
+        }).catch(async () => {
+          await endPaymentSession(true);
+        });
       } else if (window.edgeLightAPI?.openExternal) {
         await window.edgeLightAPI.openExternal(url);
+        startPaymentActivationPolling(currentSelectedPlanId);
       } else {
         window.open(url, '_blank');
+        startPaymentActivationPolling(currentSelectedPlanId);
       }
     }
-
-    // Start polling for activation
-    startPaymentActivationPolling(currentSelectedPlanId);
   }
 
   async function endPaymentSession(restoreUI = false, step = 3) {
     isPaymentSessionOpen = false;
     stopPaymentActivationPolling();
     stopPaymentTimer();
+    removePaymentVerificationModal();
     if (paymentStatusPill) {
       paymentStatusPill.classList.add('hidden');
     }
@@ -2518,7 +2799,19 @@
       await window.edgeLightAPI.endPaymentSession();
     }
     if (restoreUI) {
-      showSetupWizard(step);
+      if (wizardModal && wizardModal.classList.contains('visible')) {
+        goToWizardStep(step || 3);
+      } else if (licenseModal && licenseModal.classList.contains('visible')) {
+        showLicenseModal();
+      }
+    }
+    // Restore floating bar to its previous appropriate state
+    if (wasBarVisibleBeforePayment || !isAnyModalOpen()) {
+      showDock(true);
+    }
+    wasBarVisibleBeforePayment = false;
+    if (!isAnyModalOpen() && !bar.classList.contains('visible')) {
+      setClickThrough(true);
     }
   }
 
@@ -2588,16 +2881,70 @@
       return;
     }
 
-    // 1. Validate Payment ID / UTR: Reject current Device Hardware ID
+    // 1. Validate Payment ID / UTR vs Hardware ID
     const currentHwid = (licenseState?.hwid || hwidDisplay?.textContent || '').trim();
     const isHwidMatch =
       (currentHwid && val.toLowerCase() === currentHwid.toLowerCase()) ||
       (currentHwid && val.replace(/[\s-]/g, '').toLowerCase() === currentHwid.replace(/[\s-]/g, '').toLowerCase()) ||
-      /^[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}$/.test(val);
+      /^[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}$/.test(val) ||
+      (/^[0-9a-fA-F]{16}$/i.test(val.replace(/[\s-]/g, '')) && !val.toLowerCase().startsWith('pay_'));
 
     if (isHwidMatch) {
+      setFeedbackState('', '⏳ Validating Hardware ID through trusted licensing backend…');
+      if (window.edgeLightAPI?.verifyHardwareId) {
+        try {
+          const hwidRes = await window.edgeLightAPI.verifyHardwareId(val);
+          if (hwidRes && hwidRes.success && hwidRes.status === 'approved') {
+            setFeedbackState('success', `✓ Device license verified! ${hwidRes.planName || 'Pro'} active 🎉`);
+            await endPaymentSession(false);
+            if (window.edgeLightAPI?.refreshLicenseInfo) {
+              const updated = await window.edgeLightAPI.refreshLicenseInfo();
+              updateLicenseUI(updated);
+            }
+            return;
+          } else if (hwidRes && hwidRes.status === 'trial') {
+            setFeedbackState('error', `This is a Hardware ID on Free Trial (${hwidRes.trialRemainingHours || 72}h remaining), not proof of payment. Please enter your Razorpay Payment ID or select a plan.`);
+            return;
+          } else if (hwidRes && hwidRes.status === 'expired') {
+            setFeedbackState('error', `Hardware ID license has expired (${hwidRes.error || 'Please renew'}). Enter your Razorpay Payment ID or select a plan.`);
+            return;
+          } else if (hwidRes && hwidRes.error) {
+            setFeedbackState('error', hwidRes.error);
+            return;
+          }
+        } catch (_) {}
+      }
       setFeedbackState('error', 'This is your Hardware ID, not a Payment ID / UTR. Enter your actual payment reference.');
       return;
+    }
+
+    // 2. Administrator Authorization Key Detection
+    const isAdminToken = val.startsWith('admin_') ||
+                         val.startsWith('adm_') ||
+                         val.startsWith('edgelight_admin_') ||
+                         val.startsWith('EL_ADMIN_');
+
+    if (isAdminToken) {
+      setFeedbackState('', '⏳ Verifying administrator authorization with backend…');
+      try {
+        if (window.edgeLightAPI?.activateAdminLifetime) {
+          const adminRes = await window.edgeLightAPI.activateAdminLifetime(val);
+          if (adminRes && adminRes.success && adminRes.licenseInfo) {
+            setFeedbackState('success', '✓ Backend-Authorized Admin Lifetime Access verified! ⚡');
+            await endPaymentSession(false);
+            licenseState = adminRes.licenseInfo;
+            updateLicenseUI(adminRes.licenseInfo);
+            showPaymentVerificationModal('verified', adminRes.licenseInfo);
+            return;
+          } else {
+            setFeedbackState('error', adminRes?.error || 'Admin authorization rejected by backend.');
+            return;
+          }
+        }
+      } catch (err) {
+        setFeedbackState('error', 'Admin authorization failed: ' + err.message);
+        return;
+      }
     }
 
     isManualActivating = true;
@@ -2668,6 +3015,79 @@
     if (e.key === 'Enter') {
       e.preventDefault();
       licenseManualBtn?.click();
+    }
+  });
+
+  // Backend Admin Authorization section
+  const toggleAdminAuthBtn = document.getElementById('toggleAdminAuthBtn');
+  const adminAuthBox = document.getElementById('adminAuthBox');
+  const adminAuthKeyInput = document.getElementById('adminAuthKeyInput');
+  const adminAuthSubmitBtn = document.getElementById('adminAuthSubmitBtn');
+  const adminAuthFeedback = document.getElementById('adminAuthFeedback');
+
+  toggleAdminAuthBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!adminAuthBox) return;
+    const isHidden = adminAuthBox.classList.contains('hidden');
+    adminAuthBox.classList.toggle('hidden', !isHidden);
+    toggleAdminAuthBtn.textContent = isHidden ? '▼ Admin Authorization' : '🔐 Admin Authorization';
+    if (isHidden) adminAuthKeyInput?.focus();
+  });
+
+  async function handleAdminAuthSubmit() {
+    const keyVal = adminAuthKeyInput?.value?.trim();
+    if (!keyVal || keyVal.length < 8) {
+      if (adminAuthFeedback) {
+        adminAuthFeedback.className = 'license-manual-feedback error';
+        adminAuthFeedback.textContent = 'Please enter a valid administrator authorization key.';
+        adminAuthFeedback.classList.remove('hidden');
+      }
+      return;
+    }
+
+    if (adminAuthFeedback) {
+      adminAuthFeedback.className = 'license-manual-feedback';
+      adminAuthFeedback.textContent = '⏳ Verifying administrator credentials with backend…';
+      adminAuthFeedback.classList.remove('hidden');
+    }
+
+    try {
+      if (window.edgeLightAPI?.activateAdminLifetime) {
+        const res = await window.edgeLightAPI.activateAdminLifetime(keyVal);
+        if (res && res.success && res.licenseInfo) {
+          if (adminAuthFeedback) {
+            adminAuthFeedback.className = 'license-manual-feedback success';
+            adminAuthFeedback.textContent = '✓ Admin Lifetime Access verified & active! ⚡';
+          }
+          await endPaymentSession(false);
+          licenseState = res.licenseInfo;
+          updateLicenseUI(res.licenseInfo);
+          showPaymentVerificationModal('verified', res.licenseInfo);
+          return;
+        } else {
+          if (adminAuthFeedback) {
+            adminAuthFeedback.className = 'license-manual-feedback error';
+            adminAuthFeedback.textContent = res?.error || 'Admin authorization rejected by backend.';
+          }
+        }
+      }
+    } catch (err) {
+      if (adminAuthFeedback) {
+        adminAuthFeedback.className = 'license-manual-feedback error';
+        adminAuthFeedback.textContent = 'Authorization error: ' + err.message;
+      }
+    }
+  }
+
+  adminAuthSubmitBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    handleAdminAuthSubmit();
+  });
+
+  adminAuthKeyInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleAdminAuthSubmit();
     }
   });
 
@@ -3131,16 +3551,11 @@
       });
 
       const cancelBtn = document.getElementById('verifCancelPollBtn');
-      cancelBtn?.addEventListener('click', (e) => {
+      cancelBtn?.addEventListener('click', async (e) => {
         e.preventDefault();
         e.stopPropagation();
-        stopPaymentActivationPolling();
-        stopPaymentTimer();
         overlay.remove();
-        endPaymentSession(false);
-        if (!isAnyModalOpen() && !isPaymentSessionOpen) {
-          setClickThrough(true);
-        }
+        await endPaymentSession(true);
       });
 
     } else if (statusType === 'failed') {
@@ -3183,14 +3598,11 @@
       document.body.appendChild(overlay);
 
       const closeBtn = document.getElementById('verifCloseFailedBtn');
-      closeBtn?.addEventListener('click', (e) => {
+      closeBtn?.addEventListener('click', async (e) => {
         e.preventDefault();
         e.stopPropagation();
         overlay.remove();
-        endPaymentSession(false);
-        if (!isAnyModalOpen() && !isPaymentSessionOpen) {
-          setClickThrough(true);
-        }
+        await endPaymentSession(true);
       });
 
       const retryBtn = document.getElementById('verifRetrySubmitBtn');
@@ -3239,24 +3651,33 @@
   }
 
   if (window.edgeLightAPI?.onPaymentWindowClosed) {
-    window.edgeLightAPI.onPaymentWindowClosed((result) => {
+    window.edgeLightAPI.onPaymentWindowClosed(async (result) => {
       if (checkoutActiveBanner) checkoutActiveBanner.classList.add('hidden');
       if (result && result.success) {
         if (result.verified && result.licenseInfo) {
-          endPaymentSession(false);
+          await endPaymentSession(false);
           showPaymentVerificationModal('verified', result.licenseInfo);
         } else {
           showPaymentVerificationModal('verifying', { planId: result.planId || currentSelectedPlanId, hwid: licenseState.hwid });
           startPaymentActivationPolling(result.planId || currentSelectedPlanId);
+        }
+      } else {
+        // Window closed/cancelled without payment
+        if (isPaymentSessionOpen) {
+          await endPaymentSession(true);
         }
       }
     });
   }
 
   if (window.edgeLightAPI?.onPaymentSessionEnded) {
-    window.edgeLightAPI.onPaymentSessionEnded(() => {
-      if (!isAnyModalOpen() && !isPaymentSessionOpen) {
-        setClickThrough(true);
+    window.edgeLightAPI.onPaymentSessionEnded(async () => {
+      if (isPaymentSessionOpen) {
+        await endPaymentSession(true);
+      } else if (!isAnyModalOpen()) {
+        if (wasBarVisibleBeforePayment || !bar.classList.contains('visible')) {
+          showDock(true);
+        }
       }
     });
   }

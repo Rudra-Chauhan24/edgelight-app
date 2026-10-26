@@ -120,6 +120,14 @@ class LicenseVault {
         if (p) paths.push(path.join(p, 'license.dat'));
       } catch (_) {}
     }
+    if (process.env.APPDATA) {
+      const appDataDat = path.join(process.env.APPDATA, 'EdgeLight', 'license.dat');
+      if (!paths.includes(appDataDat)) paths.push(appDataDat);
+    }
+    if (process.env.LOCALAPPDATA) {
+      const localDataDat = path.join(process.env.LOCALAPPDATA, 'EdgeLight', 'license.dat');
+      if (!paths.includes(localDataDat)) paths.push(localDataDat);
+    }
     const homeDat = path.join(os.homedir(), '.edgelight', 'license.dat');
     if (!paths.includes(homeDat)) {
       paths.push(homeDat);
@@ -358,6 +366,14 @@ class LicenseManager {
         if (p) paths.push(path.join(p, 'claimed_payments.json'));
       } catch (_) {}
     }
+    if (process.env.APPDATA) {
+      const appDataPath = path.join(process.env.APPDATA, 'EdgeLight', 'claimed_payments.json');
+      if (!paths.includes(appDataPath)) paths.push(appDataPath);
+    }
+    if (process.env.LOCALAPPDATA) {
+      const localDataPath = path.join(process.env.LOCALAPPDATA, 'EdgeLight', 'claimed_payments.json');
+      if (!paths.includes(localDataPath)) paths.push(localDataPath);
+    }
     const homeDat = path.join(os.homedir(), '.edgelight', 'claimed_payments.json');
     if (!paths.includes(homeDat)) {
       paths.push(homeDat);
@@ -489,6 +505,59 @@ class LicenseManager {
     };
   }
 
+  async registerWithBackendServer() {
+    const backendUrl = process.env.BACKEND_URL || 'http://localhost:4000';
+    const shortHwid = (this.hwidInfo?.shortHwid || this.getShortHWID() || '').trim();
+    const fullHwid = (this.hwidInfo?.fullHash || '').trim();
+    const telemetry = this.getTelemetry();
+
+    return new Promise((resolve) => {
+      try {
+        const u = new URL('/api/licenses/register', backendUrl);
+        const payload = JSON.stringify({
+          hwid: shortHwid,
+          fullHwid: fullHwid,
+          pcName: os.hostname(),
+          appVersion: telemetry.appVersion
+        });
+        const isHttps = u.protocol === 'https:';
+        const client = isHttps ? https : require('http');
+        const req = client.request({
+          hostname: u.hostname,
+          port: u.port || (isHttps ? 443 : 80),
+          path: u.pathname,
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(payload)
+          },
+          timeout: 4000
+        }, (res) => {
+          let body = '';
+          res.on('data', chunk => body += chunk);
+          res.on('end', () => {
+            try {
+              if (res.statusCode >= 200 && res.statusCode < 300) {
+                const parsed = JSON.parse(body);
+                resolve({ success: true, data: parsed });
+              } else {
+                resolve({ success: false, statusCode: res.statusCode });
+              }
+            } catch (e) {
+              resolve({ success: false, error: e.message });
+            }
+          });
+        });
+        req.on('timeout', () => { req.destroy(); resolve({ success: false, timeout: true }); });
+        req.on('error', (err) => resolve({ success: false, error: err.message }));
+        req.write(payload);
+        req.end();
+      } catch (err) {
+        resolve({ success: false, error: err.message });
+      }
+    });
+  }
+
   // Evaluate authorization status on startup
   async initialize() {
     const now = Date.now();
@@ -496,77 +565,154 @@ class LicenseManager {
 
     let data = this.vault.read();
 
-    // First time running on this device: initialize 3-day free trial
-    if (!data) {
-      data = {
-        hwid: this.hwidInfo.fullHash,
-        shortHwid: this.hwidInfo.shortHwid,
-        status: 'trial',
-        planId: 'trial',
-        planName: '3-Day Free Trial',
-        firstLaunchTime: now,
-        firstSeenAt: new Date(now).toISOString(),
-        lastSeenAt: new Date(now).toISOString(),
-        lastSeenTime: now,
-        lastOnlineTime: now,
-        clockTampered: false,
-        registeredAt: new Date(now).toISOString(),
-        totalLaunches: 1,
-        lastDailyCheck: now
-      };
-      this.vault.write(data);
-    } else if (!this._hasInitialized) {
-      // Only increment total launches once on real app startup, not on every 30s background sync!
-      data.totalLaunches = (data.totalLaunches || 1) + 1;
-      // Initialize lastOnlineTime if missing (migration)
-      if (!data.lastOnlineTime) data.lastOnlineTime = now;
-      if (!data.firstSeenAt && data.registeredAt) data.firstSeenAt = data.registeredAt;
+    // Anti-Clock Tampering Check on existing local vault:
+    // If system clock was dialed backwards by more than 1 minute to cheat the trial
+    if (data) {
+      if (!this._hasInitialized) {
+        data.totalLaunches = (data.totalLaunches || 1) + 1;
+        if (!data.lastOnlineTime) data.lastOnlineTime = now;
+        if (!data.firstSeenAt && data.registeredAt) data.firstSeenAt = data.registeredAt;
+      }
+
+      if (data.lastSeenTime && now < data.lastSeenTime - 60000) {
+        data.clockTampered = true;
+        data.status = 'clock_tampered';
+        this.vault.write(data);
+      } else {
+        data.lastSeenTime = Math.max(data.lastSeenTime || 0, now);
+        this.vault.write(data);
+      }
     }
 
-    // Anti-Clock Tampering Check:
-    // If system clock was dialed backwards by more than 1 hour to cheat the trial
-    if (data.lastSeenTime && now < data.lastSeenTime - 3600000) {
-      data.clockTampered = true;
-      data.status = 'clock_tampered';
-      this.vault.write(data);
-    } else {
-      // Update monotonic high-water mark timestamp
-      data.lastSeenTime = now;
-      this.vault.write(data);
-    }
+    // Try synchronizing with trusted backend server or Firestore
+    let remoteSyncDone = false;
+    try {
+      const backendRes = await this.registerWithBackendServer();
+      if (backendRes && backendRes.success && backendRes.data) {
+        remoteSyncDone = true;
+        const bData = backendRes.data;
 
-    // Try synchronizing with Firestore backend (if configured)
-    if (this.firestore.isConfigured()) {
+        if (!data) {
+          data = {
+            hwid: this.hwidInfo.fullHash,
+            shortHwid: this.hwidInfo.shortHwid,
+            status: bData.status || 'trial',
+            planId: bData.planId || 'trial',
+            planName: bData.planName || '3-Day Free Trial',
+            trialStartedAt: bData.trialStartedAt || new Date(now).toISOString(),
+            trialExpiresAt: bData.trialExpiresAt,
+            firstLaunchTime: bData.trialStartedAt ? new Date(bData.trialStartedAt).getTime() : now,
+            firstSeenAt: bData.trialStartedAt || new Date(now).toISOString(),
+            lastSeenAt: new Date(now).toISOString(),
+            lastSeenTime: now,
+            lastOnlineTime: now,
+            clockTampered: false,
+            registeredAt: bData.trialStartedAt || new Date(now).toISOString(),
+            totalLaunches: 1,
+            lastDailyCheck: now,
+            licenseKey: bData.licenseKey || null,
+            expiresAt: bData.expiresAt || null,
+            isAdminGranted: Boolean(bData.isAdminGranted)
+          };
+        } else {
+          if (bData.status) data.status = bData.status;
+          if (bData.planId) data.planId = bData.planId;
+          if (bData.planName) data.planName = bData.planName;
+          if (bData.licenseKey) data.licenseKey = bData.licenseKey;
+          if (bData.expiresAt !== undefined) data.expiresAt = bData.expiresAt;
+          if (bData.isAdminGranted !== undefined) data.isAdminGranted = bData.isAdminGranted;
+          if (bData.trialExpiresAt) data.trialExpiresAt = bData.trialExpiresAt;
+          if (bData.trialStartedAt) {
+            data.trialStartedAt = bData.trialStartedAt;
+            data.firstLaunchTime = new Date(bData.trialStartedAt).getTime();
+          }
+        }
+
+        // Authoritative server-time expiry check
+        const serverNow = bData.serverTime || now;
+        const expMs = data.trialExpiresAt ? new Date(data.trialExpiresAt).getTime() : (data.firstLaunchTime + trialDurationMs);
+        if (data.status === 'trial' && serverNow > expMs) {
+          data.status = 'expired';
+        }
+
+        data.lastDailyCheck = now;
+        this.vault.write(data);
+      }
+    } catch (_) {}
+
+    // Fallback direct Firestore sync if backend endpoint was not reached and Firestore is configured
+    if (!remoteSyncDone && this.firestore && typeof this.firestore.getDocument === 'function') {
       try {
         const telemetry = this.getTelemetry();
         const remote = await this.firestore.getDocument(this.hwidInfo.shortHwid);
-        const trialRemainingMs = Math.max(0, (data.firstLaunchTime || now) + trialDurationMs - now);
-        const trialRemainingHours = Math.ceil(trialRemainingMs / 3600000);
-        const trialStatus = trialRemainingMs > 0 ? 'active' : 'expired';
 
         if (remote && remote.found && remote.doc) {
-          // If admin approved, updated plan, or rejected in Firestore, remote state takes precedence!
-          if (remote.doc.status) {
-            data.status = remote.doc.status;
-            if (remote.doc.status === 'approved' || remote.doc.status === 'trial') {
-              data.clockTampered = false;
+          remoteSyncDone = true;
+          if (!data) {
+            data = {
+              hwid: this.hwidInfo.fullHash,
+              shortHwid: this.hwidInfo.shortHwid,
+              status: remote.doc.status || 'trial',
+              planId: remote.doc.planId || 'trial',
+              planName: remote.doc.planName || '3-Day Free Trial',
+              firstLaunchTime: remote.doc.trialStartedAt ? new Date(remote.doc.trialStartedAt).getTime() : now,
+              trialStartedAt: remote.doc.trialStartedAt || remote.doc.firstSeenAt || remote.doc.registeredAt,
+              trialExpiresAt: remote.doc.trialExpiresAt,
+              firstSeenAt: remote.doc.firstSeenAt || remote.doc.registeredAt || new Date(now).toISOString(),
+              lastSeenAt: telemetry.lastSeenAt,
+              lastSeenTime: now,
+              lastOnlineTime: now,
+              clockTampered: false,
+              registeredAt: remote.doc.registeredAt || new Date(now).toISOString(),
+              totalLaunches: 1,
+              licenseKey: remote.doc.licenseKey || null,
+              paymentId: remote.doc.paymentId || null,
+              paidAt: remote.doc.paidAt || null,
+              approvedAt: remote.doc.approvedAt || null,
+              expiresAt: remote.doc.expiresAt || null,
+              isAdminGranted: Boolean(remote.doc.isAdminGranted),
+              lastDailyCheck: now
+            };
+          } else {
+            if (remote.doc.status) {
+              data.status = remote.doc.status;
+              if (remote.doc.status === 'approved' || remote.doc.status === 'trial') {
+                data.clockTampered = false;
+              }
+              if (remote.doc.status === 'trial' && remote.doc.resetTrial) {
+                data.firstLaunchTime = now;
+                data.trialStartedAt = new Date(now).toISOString();
+                data.trialExpiresAt = new Date(now + trialDurationMs).toISOString();
+              }
             }
-            if (remote.doc.status === 'trial' && remote.doc.resetTrial) {
-              data.firstLaunchTime = now;
+            if (remote.doc.planId) data.planId = remote.doc.planId;
+            if (remote.doc.planName) data.planName = remote.doc.planName;
+            if (remote.doc.licenseKey) data.licenseKey = remote.doc.licenseKey;
+            if (remote.doc.expiresAt !== undefined) data.expiresAt = remote.doc.expiresAt;
+            if (remote.doc.paymentId) data.paymentId = remote.doc.paymentId;
+            if (remote.doc.paidAt) data.paidAt = remote.doc.paidAt;
+            if (remote.doc.approvedAt) data.approvedAt = remote.doc.approvedAt;
+            if (remote.doc.isAdminGranted !== undefined) data.isAdminGranted = remote.doc.isAdminGranted;
+            if (remote.doc.trialExpiresAt) data.trialExpiresAt = remote.doc.trialExpiresAt;
+            if (remote.doc.trialStartedAt) {
+              data.trialStartedAt = remote.doc.trialStartedAt;
+              data.firstLaunchTime = new Date(remote.doc.trialStartedAt).getTime();
             }
           }
-          if (remote.doc.planId) data.planId = remote.doc.planId;
-          if (remote.doc.planName) data.planName = remote.doc.planName;
-          if (remote.doc.licenseKey) data.licenseKey = remote.doc.licenseKey;
-          if (remote.doc.expiresAt !== undefined) data.expiresAt = remote.doc.expiresAt;
-          if (remote.doc.paymentId) data.paymentId = remote.doc.paymentId;
-          if (remote.doc.paidAt) data.paidAt = remote.doc.paidAt;
-          if (remote.doc.approvedAt) data.approvedAt = remote.doc.approvedAt;
+
+          // Check if trial has expired
+          const expMs = data.trialExpiresAt ? new Date(data.trialExpiresAt).getTime() : (data.firstLaunchTime + trialDurationMs);
+          if (data.status === 'trial' && now > expMs) {
+            data.status = 'expired';
+          }
 
           data.lastDailyCheck = now;
           this.vault.write(data);
 
-          // Update existing unique device record in Firestore (never create duplicate)
+          const trialRemainingMs = Math.max(0, expMs - now);
+          const trialRemainingHours = Math.ceil(trialRemainingMs / 3600000);
+          const trialStatus = trialRemainingMs > 0 ? 'active' : 'expired';
+
           const updatePayload = {
             hwid: this.hwidInfo.shortHwid,
             lastSeenAt: telemetry.lastSeenAt,
@@ -584,12 +730,39 @@ class LicenseManager {
 
           this.firestore.upsertDocument(this.hwidInfo.shortHwid, updatePayload).catch(() => {});
         } else if (remote && remote.notFound) {
-          // Register new unique device record in Firestore
-          const firstSeen = data.firstSeenAt || data.registeredAt || new Date(data.firstLaunchTime || now).toISOString();
+          remoteSyncDone = true;
+          const firstSeen = new Date(now).toISOString();
+          const trialExpires = new Date(now + trialDurationMs).toISOString();
+
+          if (!data) {
+            data = {
+              hwid: this.hwidInfo.fullHash,
+              shortHwid: this.hwidInfo.shortHwid,
+              status: 'trial',
+              planId: 'trial',
+              planName: '3-Day Free Trial',
+              firstLaunchTime: now,
+              trialStartedAt: firstSeen,
+              trialExpiresAt: trialExpires,
+              firstSeenAt: firstSeen,
+              lastSeenAt: firstSeen,
+              lastSeenTime: now,
+              lastOnlineTime: now,
+              clockTampered: false,
+              registeredAt: firstSeen,
+              totalLaunches: 1,
+              lastDailyCheck: now
+            };
+            this.vault.write(data);
+          }
+
           const newDocPayload = {
             hwid: this.hwidInfo.shortHwid,
             firstSeenAt: firstSeen,
             registeredAt: firstSeen,
+            trialStartedAt: firstSeen,
+            trialExpiresAt: trialExpires,
+            trialDurationHours: 72,
             lastSeenAt: telemetry.lastSeenAt,
             lastActiveAt: telemetry.lastActiveAt,
             appVersion: telemetry.appVersion,
@@ -597,19 +770,40 @@ class LicenseManager {
             planId: data.planId || 'trial',
             planName: data.planName || (data.status === 'approved' ? 'Pro License' : '3-Day Free Trial'),
             expiresAt: data.expiresAt || null,
-            trialStatus: trialStatus,
-            trialRemainingHours: trialRemainingHours
+            trialStatus: 'active',
+            trialRemainingHours: 72
           };
           if (data.licenseKey) newDocPayload.licenseKey = data.licenseKey;
           if (data.paymentId) newDocPayload.paymentId = data.paymentId;
-          if (data.paidAt) newDocPayload.paidAt = data.paidAt;
-          if (data.approvedAt) newDocPayload.approvedAt = data.approvedAt;
 
           this.firestore.upsertDocument(this.hwidInfo.shortHwid, newDocPayload).catch(() => {});
         }
       } catch (e) {
         console.log('[LicenseManager] Firestore sync skipped:', e.message);
       }
+    }
+
+    // Backend failure handling:
+    // If no vault exists (e.g. freshly uninstalled/deleted) AND remote backend verification failed,
+    // do not create an unverified new trial out of nowhere. Fail closed safely.
+    if (!data) {
+      this.currentStatus = {
+        hwid: this.hwidInfo.shortHwid,
+        fullHwid: this.hwidInfo.fullHash,
+        planId: 'trial',
+        planName: '3-Day Free Trial',
+        isAuthorized: false,
+        status: 'unverified',
+        daysRemaining: 0,
+        planRemainingDays: 0,
+        trialRemainingHours: 0,
+        trialRemainingDays: 0,
+        trialRemainingMs: 0,
+        isLifetime: false,
+        isExpired: false,
+        message: 'Internet connection required to activate or verify 3-day free trial.'
+      };
+      return this.currentStatus;
     }
 
     // Start daily randomized check once on initial startup if not already scheduled
@@ -668,6 +862,7 @@ class LicenseManager {
         data.planName = remote.doc.planName || data.planName;
         data.licenseKey = remote.doc.licenseKey || data.licenseKey;
         data.expiresAt = remote.doc.expiresAt !== undefined ? remote.doc.expiresAt : data.expiresAt;
+        if (remote.doc.isAdminGranted !== undefined) data.isAdminGranted = remote.doc.isAdminGranted;
         data.lastDailyCheck = now;
         this.vault.write(data);
 
@@ -696,9 +891,15 @@ class LicenseManager {
     const trialDurationHours = this.config.TRIAL_DURATION_HOURS || 72;
     const trialDurationMs = trialDurationHours * 60 * 60 * 1000;
     const firstLaunch = data.firstLaunchTime || now;
-    const elapsedMs = Math.max(0, now - firstLaunch);
-    const remainingMs = Math.max(0, trialDurationMs - elapsedMs);
-    const trialExpiresAt = firstLaunch + trialDurationMs;
+    let trialExpiresAt;
+    if (data.trialExpiresAt) {
+      trialExpiresAt = typeof data.trialExpiresAt === 'number'
+        ? data.trialExpiresAt
+        : new Date(data.trialExpiresAt).getTime();
+    } else {
+      trialExpiresAt = firstLaunch + trialDurationMs;
+    }
+    const remainingMs = Math.max(0, trialExpiresAt - now);
     const remainingHours = Math.ceil(remainingMs / (1000 * 60 * 60));
     const remainingDays = Math.floor(remainingHours / 24);
 
@@ -712,12 +913,27 @@ class LicenseManager {
       paidAt: data.paidAt || data.approvedAt || null,
       approvedAt: data.approvedAt || data.paidAt || null,
       expiresAt: data.expiresAt || null,
+      isAdminGranted: Boolean(data.isAdminGranted),
       lastDailyCheck: data.lastDailyCheck || null,
       trialExpiresAt: trialExpiresAt,
       trialRemainingMs: remainingMs,
       trialDurationHours: trialDurationHours,
       firstLaunchTime: firstLaunch
     };
+
+    if (data.status === 'unverified') {
+      this.currentStatus = {
+        ...baseInfo,
+        isAuthorized: false,
+        status: 'unverified',
+        trialRemainingHours: 0,
+        trialRemainingDays: 0,
+        trialRemainingMs: 0,
+        trialExpiresAt: trialExpiresAt,
+        message: 'Internet connection required to activate or verify 3-day free trial.'
+      };
+      return this.currentStatus;
+    }
 
     if (data.clockTampered) {
       this.currentStatus = {
@@ -824,7 +1040,9 @@ class LicenseManager {
         trialRemainingDays: 9999,
         isLifetime: true,
         isExpired: false,
-        message: 'Commercial License Active — Lifetime Pro'
+        message: data.isAdminGranted
+          ? 'Commercial License Active — Lifetime Pro (Admin)'
+          : 'Commercial License Active — Lifetime Pro'
       };
       return this.currentStatus;
     }
@@ -870,11 +1088,15 @@ class LicenseManager {
 
   async resetTrial() {
     const now = Date.now();
+    const trialDurationHours = this.config.TRIAL_DURATION_HOURS || 72;
+    const trialDurationMs = trialDurationHours * 60 * 60 * 1000;
     let data = this.vault.read() || {};
     data.status = 'trial';
     data.planId = 'trial';
     data.planName = '3-Day Free Trial';
     data.firstLaunchTime = now;
+    data.trialStartedAt = new Date(now).toISOString();
+    data.trialExpiresAt = new Date(now + trialDurationMs).toISOString();
     data.lastSeenTime = now;
     data.lastOnlineTime = now;
     data.clockTampered = false;
@@ -883,6 +1105,7 @@ class LicenseManager {
     data.paidAt = null;
     data.approvedAt = null;
     data.expiresAt = null;
+    data.isAdminGranted = false;
     this.vault.write(data);
     return this._evaluate(data);
   }
@@ -1449,6 +1672,285 @@ class LicenseManager {
     } finally {
       LicenseManager._claimLocks.delete(regKey);
       if (releaseLock) releaseLock();
+    }
+  }
+
+  // ── BACKEND-AUTHORIZED ADMIN LIFETIME ACCESS ──────────────────────
+  async activateAdminLifetime(adminToken, adminIdentity = null) {
+    const cleanToken = String(adminToken || '').trim();
+    if (!cleanToken || cleanToken.length < 8) {
+      return { success: false, error: 'Admin authorization key is invalid or too short.' };
+    }
+
+    const shortHwid = (this.hwidInfo?.shortHwid || this.getShortHWID() || '').trim();
+    const backendUrl = process.env.BACKEND_URL || 'http://localhost:4000';
+
+    return new Promise((resolve) => {
+      try {
+        const u = new URL('/api/admin/grant-lifetime', backendUrl);
+        const payload = JSON.stringify({
+          hwid: shortHwid,
+          adminToken: cleanToken,
+          adminIdentity: adminIdentity || undefined
+        });
+        const isHttps = u.protocol === 'https:';
+        const client = isHttps ? https : require('http');
+
+        const req = client.request({
+          hostname: u.hostname,
+          port: u.port || (isHttps ? 443 : 80),
+          path: u.pathname,
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${cleanToken}`,
+            'Content-Length': Buffer.byteLength(payload)
+          },
+          timeout: 6000
+        }, (res) => {
+          let body = '';
+          res.on('data', chunk => body += chunk);
+          res.on('end', () => {
+            try {
+              const parsed = JSON.parse(body);
+              if (res.statusCode === 200 && parsed && parsed.success && parsed.licenseInfo) {
+                const lic = parsed.licenseInfo;
+                // Strict validation: Ensure backend returned approved lifetime for THIS device's HWID
+                if (lic.status === 'approved' && lic.planId === 'lifetime' && lic.hwid === shortHwid) {
+                  let data = this.vault.read() || {};
+                  data.status = 'approved';
+                  data.planId = 'lifetime';
+                  data.planName = lic.planName || 'Lifetime Pro (Admin)';
+                  data.licenseKey = lic.licenseKey;
+                  data.expiresAt = null;
+                  data.isAdminGranted = true;
+                  data.adminGrantedAt = new Date().toISOString();
+                  data.approvedAt = lic.approvedAt || new Date().toISOString();
+                  data.clockTampered = false;
+                  this.vault.write(data);
+
+                  const evaluated = this._evaluate(data);
+                  resolve({
+                    success: true,
+                    status: 'approved',
+                    licenseInfo: evaluated
+                  });
+                  return;
+                }
+              }
+              resolve({
+                success: false,
+                error: parsed?.error || `Admin authorization rejected (HTTP ${res.statusCode})`
+              });
+            } catch (e) {
+              resolve({ success: false, error: 'Invalid response from licensing backend.' });
+            }
+          });
+        });
+
+        req.on('timeout', () => {
+          req.destroy();
+          resolve({ success: false, error: 'Backend server timed out. Check your connection.' });
+        });
+        req.on('error', (err) => {
+          resolve({ success: false, error: `Connection failed: ${err.message}` });
+        });
+        req.write(payload);
+        req.end();
+      } catch (err) {
+        resolve({ success: false, error: `Request error: ${err.message}` });
+      }
+    });
+  }
+
+  // ── HARDWARE ID & DEVICE LICENSE VERIFICATION ──────────────────
+  async verifyHardwareId(inputHwid) {
+    const rawInput = String(inputHwid || '').trim();
+    if (!rawInput) {
+      return {
+        success: false,
+        validFormat: false,
+        isThisDevice: false,
+        error: 'Hardware ID cannot be empty. Please provide a valid device HWID.'
+      };
+    }
+
+    // Format validation: Short HWID is 16 hex chars (XXXX-XXXX-XXXX-XXXX), Full HWID is 64 hex chars
+    const cleanHwid = rawInput.replace(/[^a-fA-F0-9]/g, '').toUpperCase();
+    const isShortHex = cleanHwid.length === 16;
+    const isFullHex = cleanHwid.length === 64;
+    const isStandardFormat = /^[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}$/.test(rawInput);
+
+    if (!isShortHex && !isFullHex && !isStandardFormat) {
+      return {
+        success: false,
+        validFormat: false,
+        isThisDevice: false,
+        error: `Invalid Hardware ID format ("${rawInput}"). Expected 16-character format: XXXX-XXXX-XXXX-XXXX.`
+      };
+    }
+
+    const shortTarget = isShortHex
+      ? cleanHwid.match(/.{1,4}/g).join('-')
+      : (isStandardFormat ? rawInput.toUpperCase() : this.hwidInfo.shortHwid);
+
+    // Device binding verification
+    const currentDeviceShort = this.hwidInfo.shortHwid.toUpperCase();
+    const currentDeviceFull = this.hwidInfo.fullHash.toUpperCase();
+    const isThisDevice =
+      shortTarget.toUpperCase() === currentDeviceShort ||
+      cleanHwid === currentDeviceShort.replace(/-/g, '') ||
+      cleanHwid === currentDeviceFull;
+
+    // Check backend Firestore
+    if (!this.firestore.isConfigured()) {
+      // Local evaluation fallback if offline
+      const localVault = this.vault.read() || {};
+      const evalStatus = this._evaluate(localVault);
+      return {
+        success: isThisDevice && evalStatus.isAuthorized,
+        validFormat: true,
+        isThisDevice,
+        hwid: shortTarget,
+        status: evalStatus.status,
+        planName: evalStatus.planName,
+        isAuthorized: evalStatus.isAuthorized,
+        message: isThisDevice
+          ? `Device verified locally: ${evalStatus.message}`
+          : 'Hardware ID format is valid, but belongs to a different machine.'
+      };
+    }
+
+    try {
+      const docLookup = isThisDevice ? this.hwidInfo.shortHwid : shortTarget;
+      const remote = await this.firestore.getDocument(docLookup);
+
+      if (!remote) {
+        return {
+          success: false,
+          validFormat: true,
+          isThisDevice,
+          hwid: shortTarget,
+          error: 'Licensing server unreachable. Please check your internet connection.'
+        };
+      }
+
+      if (remote.notFound) {
+        return {
+          success: false,
+          validFormat: true,
+          isThisDevice,
+          hwid: shortTarget,
+          status: 'unregistered',
+          error: isThisDevice
+            ? 'Hardware ID is valid but not yet registered in cloud licensing directory. Run app online to register your 3-day free trial.'
+            : `Hardware ID (${shortTarget}) was not found in the licensing backend.`
+        };
+      }
+
+      const doc = remote.doc || {};
+      const status = doc.status || 'trial';
+      const planName = doc.planName || (status === 'approved' ? 'Pro License' : '3-Day Free Trial');
+      const expiresAt = doc.expiresAt || null;
+      const now = Date.now();
+
+      // Check expiration
+      let isExpired = false;
+      if (expiresAt) {
+        const expMs = new Date(expiresAt).getTime();
+        if (now > expMs) isExpired = true;
+      }
+
+      // If checking this device and remote has approved license, sync to local vault!
+      if (isThisDevice && status === 'approved' && !isExpired) {
+        const localVault = this.vault.read() || {};
+        localVault.status = 'approved';
+        localVault.planId = doc.planId || localVault.planId || 'quarterly';
+        localVault.planName = doc.planName || localVault.planName || '3-Month Pass';
+        localVault.licenseKey = doc.licenseKey || localVault.licenseKey;
+        localVault.expiresAt = expiresAt;
+        localVault.paymentId = doc.paymentId || localVault.paymentId;
+        localVault.approvedAt = doc.approvedAt || new Date(now).toISOString();
+        localVault.clockTampered = false;
+        this.vault.write(localVault);
+        this.currentStatus = this._evaluate(localVault);
+      }
+
+      if (isExpired) {
+        return {
+          success: false,
+          validFormat: true,
+          isThisDevice,
+          hwid: shortTarget,
+          status: 'expired',
+          planName,
+          expiresAt,
+          error: `License for ${shortTarget} expired on ${new Date(expiresAt).toLocaleDateString()}. Please renew with Razorpay.`
+        };
+      }
+
+      if (status === 'rejected' || status === 'revoked') {
+        return {
+          success: false,
+          validFormat: true,
+          isThisDevice,
+          hwid: shortTarget,
+          status: 'rejected',
+          error: `Device access for ${shortTarget} has been revoked by administrator.`
+        };
+      }
+
+      if (status === 'approved') {
+        return {
+          success: true,
+          validFormat: true,
+          isThisDevice,
+          hwid: shortTarget,
+          status: 'approved',
+          planName,
+          expiresAt,
+          isLifetime: !expiresAt,
+          message: `✓ Verified active license for ${shortTarget}: ${planName}${expiresAt ? ` (Valid until ${new Date(expiresAt).toLocaleDateString()})` : ' (Lifetime Pro)'}`
+        };
+      }
+
+      // Trial status
+      const trialExpiresAt = doc.trialExpiresAt;
+      let isTrialExpired = false;
+      if (trialExpiresAt && now > new Date(trialExpiresAt).getTime()) {
+        isTrialExpired = true;
+      }
+      if (status === 'expired' || isTrialExpired) {
+        return {
+          success: false,
+          validFormat: true,
+          isThisDevice,
+          hwid: shortTarget,
+          status: 'expired',
+          planName: '3-Day Free Trial',
+          error: `3-Day Free Trial for ${shortTarget} has expired. Please choose an affordable pass under ₹100 to continue.`
+        };
+      }
+
+      const trialRemainingHours = doc.trialRemainingHours !== undefined ? doc.trialRemainingHours : 72;
+      return {
+        success: isThisDevice,
+        validFormat: true,
+        isThisDevice,
+        hwid: shortTarget,
+        status: 'trial',
+        planName: '3-Day Free Trial',
+        trialRemainingHours,
+        message: `Device ${shortTarget} is on Free Trial (${trialRemainingHours}h remaining). Upgrade with Razorpay to activate Pro.`
+      };
+    } catch (netErr) {
+      return {
+        success: false,
+        validFormat: true,
+        isThisDevice,
+        hwid: shortTarget,
+        error: `Network verification failure: ${netErr.message || 'Unable to reach Firestore backend.'}`
+      };
     }
   }
 }

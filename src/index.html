@@ -71,10 +71,23 @@
       <input id="temp" type="range" min="0" max="100" value="50" aria-label="Colour temperature">
     </div>
 
-    <!-- 5. Thickness slider -->
+    <!-- 3. Thickness slider -->
     <div class="ctrl">
       <label for="thickness"><span class="ctrl-icon">📐</span> Thickness <span class="val" id="thicknessVal">96px</span></label>
       <input id="thickness" type="range" min="20" max="180" value="96" step="2" aria-label="Ring thickness">
+    </div>
+
+    <!-- 4. Auto Face & Camera Detection Toggle -->
+    <div class="ctrl auto-ctrl">
+      <div class="auto-row">
+        <label for="autoFaceSwitch" class="auto-label">
+          <span class="ctrl-icon">👤</span> Auto Face
+        </label>
+        <button id="autoFaceSwitch" type="button" class="switch-btn active" role="switch" aria-checked="true" aria-label="Toggle Auto Face and Camera Detection">
+          <span class="switch-handle"></span>
+        </button>
+      </div>
+      <div id="faceStatusHint" class="face-status-hint">Auto lighting on face presence</div>
     </div>
 
     <!-- Divider -->
@@ -140,6 +153,19 @@
               <button type="button" id="licenseManualBtn" class="license-manual-btn">Activate</button>
             </div>
             <div id="licenseManualFeedback" class="license-manual-feedback hidden"></div>
+          </div>
+
+          <!-- Backend Admin Authorization (For Authorized Admin Only) -->
+          <div class="admin-auth-wrap">
+            <button type="button" id="toggleAdminAuthBtn" class="admin-auth-toggle-btn">🔐 Admin Authorization</button>
+            <div id="adminAuthBox" class="admin-auth-box hidden">
+              <div class="admin-auth-label">Administrator Authorization Key:</div>
+              <div class="admin-auth-row">
+                <input type="password" id="adminAuthKeyInput" class="admin-auth-input" placeholder="Paste backend admin key" autocomplete="off" />
+                <button type="button" id="adminAuthSubmitBtn" class="admin-auth-btn">Authorize ⚡</button>
+              </div>
+              <div id="adminAuthFeedback" class="license-manual-feedback hidden" style="margin-top: 6px;"></div>
+            </div>
           </div>
         </div>
       </div>
@@ -479,6 +505,7 @@
   <!-- Privacy notice shown strictly when camera is active AND dock is visible -->
   <div id="privacy-note">🔒 Camera processed locally — no video stored or transmitted</div>
 
+  <script src="face-detector.js"></script>
   <script src="renderer.js"></script>
 </body>
 </html>

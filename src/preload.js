@@ -4,8 +4,8 @@ contextBridge.exposeInMainWorld('edgeLightAPI', {
   setIgnoreMouseEvents: (ignore, options) => {
     ipcRenderer.send('set-ignore-mouse-events', ignore, options);
   },
-  bringToFront: () => {
-    ipcRenderer.send('bring-to-front');
+  bringToFront: (shouldFocus = false) => {
+    ipcRenderer.send('bring-to-front', shouldFocus);
   },
   onToggleLight: (callback) => {
     const subscription = (_event, ...args) => callback(...args);
@@ -44,6 +44,23 @@ contextBridge.exposeInMainWorld('edgeLightAPI', {
   setLaunchAtLogin: (enable) => ipcRenderer.invoke('set-launch-at-login', enable),
   getLicenseInfo: () => ipcRenderer.invoke('get-license-info'),
   refreshLicenseInfo: () => ipcRenderer.invoke('refresh-license-info'),
+  verifyHardwareId: (hwid) => ipcRenderer.invoke('verify-hardware-id', hwid),
+  getDisplayInfo: () => ipcRenderer.invoke('get-display-info'),
+  onDisplayConfigurationChanged: (callback) => {
+    const subscription = (_event, config) => callback(config);
+    ipcRenderer.on('display-configuration-changed', subscription);
+    return () => ipcRenderer.removeListener('display-configuration-changed', subscription);
+  },
+  onSystemSuspend: (callback) => {
+    const subscription = () => callback();
+    ipcRenderer.on('system-suspend', subscription);
+    return () => ipcRenderer.removeListener('system-suspend', subscription);
+  },
+  onSystemResume: (callback) => {
+    const subscription = () => callback();
+    ipcRenderer.on('system-resume', subscription);
+    return () => ipcRenderer.removeListener('system-resume', subscription);
+  },
   resetTrial: () => ipcRenderer.invoke('reset-trial'),
   copyHWID: () => ipcRenderer.invoke('copy-hwid'),
   getPaymentConfig: () => ipcRenderer.invoke('get-payment-config'),
@@ -97,6 +114,7 @@ contextBridge.exposeInMainWorld('edgeLightAPI', {
   startPaymentSession: () => ipcRenderer.invoke('start-payment-session'),
   endPaymentSession: () => ipcRenderer.invoke('end-payment-session'),
   activatePaymentRef: (params) => ipcRenderer.invoke('activate-payment-ref', params),
+  activateAdminLifetime: (params) => ipcRenderer.invoke('activate-admin-lifetime', params),
   onPaymentSessionStarted: (callback) => {
     const subscription = (_event, data) => callback(data);
     ipcRenderer.on('payment-session-started', subscription);
