@@ -1,5 +1,5 @@
 const { app, BrowserWindow, screen, ipcMain, Tray, Menu, nativeImage, globalShortcut, session, clipboard, shell, powerMonitor } = require('electron');
-const { execFile, fork } = require('child_process');
+const { execFile, fork, spawn } = require('child_process');
 const path = require('path');
 const os = require('os');
 const https = require('https');
@@ -26,33 +26,83 @@ try {
 // ── LOCAL LICENSING BACKEND SERVICE INTEGRATION ────────────────────
 let localBackendProcess = null;
 
-function ensureLocalBackendService() {
-  if (localBackendProcess && !localBackendProcess.killed) return;
-  const backendServerPath = path.resolve(__dirname, '..', 'backend', 'server.js');
-  if (!fs.existsSync(backendServerPath)) return;
+function findBackendServerPath() {
+  const candidates = [
+    path.resolve(__dirname, '..', 'backend', 'server.js'),
+    path.resolve(__dirname, '..', '..', 'backend', 'server.js'),
+    path.resolve(process.resourcesPath || '', 'backend', 'server.js'),
+    path.resolve(process.resourcesPath || '', 'app.asar.unpacked', 'backend', 'server.js'),
+    'C:\\Edgelight\\backend\\server.js'
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return null;
+}
 
-  const req = http.get('http://127.0.0.1:4000/api/health', { timeout: 1000 }, (res) => {
-    res.resume();
+function checkBackendHealth(timeoutMs = 600) {
+  return new Promise((resolve) => {
+    const req = http.get('http://127.0.0.1:4000/api/health', { timeout: timeoutMs }, (res) => {
+      res.resume();
+      resolve(res.statusCode === 200);
+    });
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => {
+      req.destroy();
+      resolve(false);
+    });
   });
+}
 
-  req.on('error', () => {
+async function ensureLocalBackendService() {
+  // If backend is already running and healthy, return immediately
+  const healthy = await checkBackendHealth(500);
+  if (healthy) return true;
+
+  if (localBackendProcess && !localBackendProcess.killed) {
+    for (let i = 0; i < 15; i++) {
+      await new Promise(r => setTimeout(r, 150));
+      if (await checkBackendHealth(350)) return true;
+    }
+  }
+
+  const backendServerPath = findBackendServerPath();
+  if (!backendServerPath) return false;
+
+  const backendDir = path.dirname(backendServerPath);
+  try {
+    const spawnEnv = { ...process.env, PORT: '4000', ELECTRON_RUN_AS_NODE: '1' };
     try {
-      const backendDir = path.resolve(__dirname, '..', 'backend');
-      localBackendProcess = fork(backendServerPath, [], {
+      localBackendProcess = spawn('node', [backendServerPath], {
         cwd: backendDir,
-        env: { ...process.env, PORT: '4000', ELECTRON_RUN_AS_NODE: '1' },
+        env: spawnEnv,
+        detached: true,
         stdio: 'ignore'
       });
       localBackendProcess.unref();
-      console.log('[Backend] Local licensing backend service spawned on port 4000.');
-    } catch (err) {
-      console.warn('[Backend] Could not spawn local backend service:', err.message);
+    } catch (_) {
+      localBackendProcess = fork(backendServerPath, [], {
+        cwd: backendDir,
+        env: spawnEnv,
+        stdio: 'ignore'
+      });
+      localBackendProcess.unref();
     }
-  });
 
-  req.on('timeout', () => {
-    req.destroy();
-  });
+    console.log('[Backend] Local licensing backend service spawned from:', backendServerPath);
+
+    // Wait until backend is healthy and responding (up to 3.5 seconds)
+    for (let i = 0; i < 20; i++) {
+      await new Promise(r => setTimeout(r, 180));
+      if (await checkBackendHealth(300)) {
+        console.log('[Backend] Local licensing backend verified healthy on port 4000.');
+        return true;
+      }
+    }
+  } catch (err) {
+    console.warn('[Backend] Could not spawn local backend service:', err.message);
+  }
+  return false;
 }
 
 function stopLocalBackendService() {
@@ -969,10 +1019,13 @@ ipcMain.handle('activate-admin-lifetime', async (event, params) => {
     if (!token || typeof token !== 'string') {
       return { success: false, error: 'Admin authorization token is required.' };
     }
+    const isLocalBackend = !process.env.BACKEND_URL || process.env.BACKEND_URL.includes('localhost') || process.env.BACKEND_URL.includes('127.0.0.1');
+    if (isLocalBackend) {
+      await ensureLocalBackendService();
+    }
     let res = await licenseManager.activateAdminLifetime(token, identity);
-    if (!res.success && res.error && res.error.includes('Connection failed') && (!process.env.BACKEND_URL || process.env.BACKEND_URL.includes('localhost') || process.env.BACKEND_URL.includes('127.0.0.1'))) {
-      ensureLocalBackendService();
-      await new Promise(r => setTimeout(r, 1200));
+    if (!res.success && res.error && res.error.includes('Connection failed') && isLocalBackend) {
+      await ensureLocalBackendService();
       res = await licenseManager.activateAdminLifetime(token, identity);
     }
     if (res && res.success && mainWindow && !mainWindow.isDestroyed()) {
