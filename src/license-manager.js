@@ -18,6 +18,7 @@ function loadEnv() {
   });
 
   const config = {
+    BACKEND_URL: process.env.BACKEND_URL || 'http://localhost:4000',
     FIREBASE_PROJECT_ID: 'edge-light-24',
     FIREBASE_API_KEY: '',
     FIREBASE_AUTH_DOMAIN: 'edge-light-24.firebaseapp.com',
@@ -37,7 +38,7 @@ function loadEnv() {
   };
 
   try {
-    if (fs.existsSync(envPath)) {
+    if (envPath && fs.existsSync(envPath)) {
       const content = fs.readFileSync(envPath, 'utf8');
       const lines = content.split(/\r?\n/);
       for (const line of lines) {
@@ -49,6 +50,9 @@ function loadEnv() {
           const val = trimmed.slice(eqIdx + 1).trim().replace(/^['"]|['"]$/g, '');
           if (key && val) {
             config[key] = key === 'TRIAL_DURATION_HOURS' ? parseInt(val, 10) || 72 : val;
+            if (!process.env[key]) {
+              process.env[key] = val;
+            }
           }
         }
       }
@@ -1683,7 +1687,7 @@ class LicenseManager {
     }
 
     const shortHwid = (this.hwidInfo?.shortHwid || this.getShortHWID() || '').trim();
-    const backendUrl = process.env.BACKEND_URL || 'http://localhost:4000';
+    const backendUrl = process.env.BACKEND_URL || this.config?.BACKEND_URL || 'http://localhost:4000';
 
     return new Promise((resolve) => {
       try {
@@ -1706,7 +1710,7 @@ class LicenseManager {
             'Authorization': `Bearer ${cleanToken}`,
             'Content-Length': Buffer.byteLength(payload)
           },
-          timeout: 6000
+          timeout: 8000
         }, (res) => {
           let body = '';
           res.on('data', chunk => body += chunk);
@@ -1753,7 +1757,11 @@ class LicenseManager {
           resolve({ success: false, error: 'Backend server timed out. Check your connection.' });
         });
         req.on('error', (err) => {
-          resolve({ success: false, error: `Connection failed: ${err.message}` });
+          const isConnRefused = err.code === 'ECONNREFUSED' || (err.message && err.message.includes('ECONNREFUSED'));
+          const errorMsg = isConnRefused
+            ? `Connection failed: Backend server is unreachable at ${backendUrl}. Please ensure the backend server is running.`
+            : `Connection failed: ${err.message}`;
+          resolve({ success: false, error: errorMsg });
         });
         req.write(payload);
         req.end();

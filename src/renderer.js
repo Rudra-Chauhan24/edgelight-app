@@ -86,6 +86,10 @@
   let autoFaceEnabled = true;
   let wasTurnedOnByFace = false;
   let manualTurnedOffWhileFaceActive = false;
+  let userCustomizedBrightness = false;
+  let smoothFaceLuminance = null;
+  let darkConfirmationFrames = 0;
+  let brightConfirmationFrames = 0;
   let faceStream = null;
   let faceVideoEl = null;
   let faceDetector = null;
@@ -789,6 +793,7 @@
 
   // Slider inputs: update targets and smoothly interpolate in canvas
   brightnessInput?.addEventListener('input', () => {
+    userCustomizedBrightness = true;
     state.brightness = brightnessInput.value / 100;
     if (brightnessVal) brightnessVal.textContent = `${brightnessInput.value}%`;
     showStatus(`✨ Opacity: ${brightnessInput.value}%`, 1600);
@@ -1782,7 +1787,129 @@
     }
   });
 
-  // ── Face Presence Detection Architecture & Camera Lifecycle ─────
+  // ── Face Presence & Smart Ambient Lighting Architecture ─────────
+  function handleFaceLightingUpdate(sample) {
+    if (!autoFaceEnabled || !faceDetector) return;
+    const isFacePresent = sample ? sample.isFacePresent : faceDetector.isFacePresent();
+    const lighting = sample?.lighting || faceDetector.getLighting?.();
+    const rawLum = lighting ? lighting.effectiveLuminance : 50;
+
+    // Screen self-illumination compensation:
+    // When Edge Light is illuminated, screen light casts onto the user's face and room.
+    // Compensating prevents hunting/flickering cycles.
+    const screenLight = (state.on ? 12 : 0) * (renderState.brightness || 1.0);
+    const ambientLuminance = Math.max(0, rawLum - screenLight);
+
+    // Responsive Exponential Moving Average (< 200ms adaptation)
+    if (smoothFaceLuminance === null) {
+      smoothFaceLuminance = ambientLuminance;
+    } else {
+      smoothFaceLuminance = smoothFaceLuminance * 0.70 + ambientLuminance * 0.30;
+    }
+
+    const currentLux = Math.round(smoothFaceLuminance);
+    const threshold = state.autoThreshold || 70;
+    const HYSTERESIS = 5.0;
+
+    // Update liveLux indicator in UI if present
+    if (liveLux) {
+      liveLux.textContent = `· ${currentLux}`;
+      liveLux.style.color = currentLux < threshold ? '#ffb366' : '#85d2ff';
+      liveLux.title = `Face & ambient light: ${currentLux} (threshold: ${threshold})`;
+    }
+
+    if (!isFacePresent) {
+      darkConfirmationFrames = 0;
+      brightConfirmationFrames = 0;
+      if (faceStatusHint) {
+        faceStatusHint.textContent = '👤 Waiting for face…';
+        faceStatusHint.classList.remove('detected');
+      }
+      return;
+    }
+
+    // Face is present: update status hint
+    if (faceStatusHint) {
+      faceStatusHint.classList.add('detected');
+      if (currentLux < threshold - HYSTERESIS) {
+        faceStatusHint.textContent = `👤 Face detected (low light: ${currentLux})`;
+      } else if (currentLux > threshold + HYSTERESIS) {
+        faceStatusHint.textContent = `👤 Face detected (well lit: ${currentLux})`;
+      } else {
+        faceStatusHint.textContent = `👤 Face detected (light: ${currentLux})`;
+      }
+    }
+
+    // Evaluate lighting conditions:
+    if (currentLux < threshold - HYSTERESIS) {
+      // 🌑 DARK CONDITION (room lights off, dark room, decreased lighting)
+      brightConfirmationFrames = 0;
+      darkConfirmationFrames++;
+
+      // Require 2 consecutive frames (~280ms) for stability before auto-activating
+      if (darkConfirmationFrames >= 2) {
+        if (!manualTurnedOffWhileFaceActive) {
+          if (!state.on) {
+            wasTurnedOnByFace = true;
+            setOn(true);
+            showStatus(`🌑 Low light (${currentLux}) — Edge Light on ✨`, 2200);
+          }
+
+          // Automatically adjust brightness according to how dark face appears:
+          // Darker conditions -> stronger lighting (up to 100%)
+          // Mild low-light -> moderate lighting (~35% - 60%)
+          if (!userCustomizedBrightness) {
+            const darknessRatio = Math.max(0, Math.min(1.0, (threshold - currentLux) / threshold));
+            const autoBrightness = Math.min(1.0, Math.max(0.35, 0.35 + darknessRatio * 0.65));
+
+            if (Math.abs(state.brightness - autoBrightness) > 0.03) {
+              state.brightness = autoBrightness;
+              if (brightnessInput) {
+                brightnessInput.value = Math.round(autoBrightness * 100);
+              }
+              if (brightnessVal) {
+                brightnessVal.textContent = `${Math.round(autoBrightness * 100)}%`;
+              }
+              requestRender();
+            }
+          }
+        }
+      }
+    } else if (currentLux > threshold + HYSTERESIS) {
+      // ☀️ BRIGHT CONDITION (daylight, near open door, room lights on)
+      darkConfirmationFrames = 0;
+      brightConfirmationFrames++;
+
+      // As environment brightens, smoothly reduce intensity first if on
+      if (state.on && wasTurnedOnByFace && !userCustomizedBrightness) {
+        if (state.brightness > 0.35) {
+          state.brightness = Math.max(0.35, state.brightness - 0.04);
+          if (brightnessInput) {
+            brightnessInput.value = Math.round(state.brightness * 100);
+          }
+          if (brightnessVal) {
+            brightnessVal.textContent = `${Math.round(state.brightness * 100)}%`;
+          }
+          requestRender();
+        }
+      }
+
+      // Require 7 consecutive bright frames (~1000ms confirmation period) to turn off
+      if (brightConfirmationFrames >= 7) {
+        if (wasTurnedOnByFace && state.on) {
+          wasTurnedOnByFace = false;
+          setOn(false);
+          showStatus(`☀️ Ambient bright (${currentLux}) — Edge Light off`, 2200);
+        }
+      }
+    } else {
+      // In deadband [threshold - HYSTERESIS, threshold + HYSTERESIS]
+      darkConfirmationFrames = 0;
+      brightConfirmationFrames = 0;
+    }
+  }
+  window.__handleFaceLightingUpdate = handleFaceLightingUpdate;
+
   if (typeof FacePresenceDetector !== 'undefined') {
     faceDetector = new FacePresenceDetector({
       consecutiveRequired: 3,
@@ -1805,21 +1932,33 @@
 
       if (isPresent) {
         if (!manualTurnedOffWhileFaceActive) {
-          if (!state.on) {
-            wasTurnedOnByFace = true;
-            setOn(true);
-            showStatus('👤 Face detected — Edge Light on ✨', 2400);
+          // Check lighting info: if dark, activate immediately; otherwise handleFaceLightingUpdate manages
+          const lighting = info?.lighting || faceDetector.getLighting?.();
+          const effectiveLum = lighting ? lighting.effectiveLuminance : (smoothFaceLuminance ?? 50);
+          const threshold = state.autoThreshold || 70;
+          if (effectiveLum < threshold) {
+            if (!state.on) {
+              wasTurnedOnByFace = true;
+              setOn(true);
+              showStatus('👤 Face detected — Edge Light on ✨', 2400);
+            }
           }
         }
       } else {
         // Face has departed and grace period expired without flicker
         manualTurnedOffWhileFaceActive = false; // Re-arm automatic detection for next arrival
+        darkConfirmationFrames = 0;
+        brightConfirmationFrames = 0;
         if (wasTurnedOnByFace && state.on) {
           wasTurnedOnByFace = false;
           setOn(false);
           showStatus('👤 Face absent — Edge Light off', 2200);
         }
       }
+    };
+
+    faceDetector.onLightingUpdate = (sample) => {
+      handleFaceLightingUpdate(sample);
     };
   }
 
@@ -1946,6 +2085,10 @@
 
   function toggleAutoFace() {
     autoFaceEnabled = !autoFaceEnabled;
+    userCustomizedBrightness = false;
+    smoothFaceLuminance = null;
+    darkConfirmationFrames = 0;
+    brightConfirmationFrames = 0;
     if (autoFaceSwitch) {
       autoFaceSwitch.setAttribute('aria-checked', autoFaceEnabled ? 'true' : 'false');
       autoFaceSwitch.classList.toggle('active', autoFaceEnabled);

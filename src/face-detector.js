@@ -25,6 +25,8 @@ class FacePresenceDetector {
     this.lastFaceDetectedTime = 0;
     this.onFaceStateChange = options.onFaceStateChange || null;
     this.onDetectionSample = options.onDetectionSample || null;
+    this.onLightingUpdate = options.onLightingUpdate || null;
+    this.latestLighting = null;
     this.enabled = options.enabled !== false;
     this.isProcessing = false;
     this.lastProcessTime = 0;
@@ -39,6 +41,15 @@ class FacePresenceDetector {
 
   isFacePresent() {
     return !!this._facePresentState;
+  }
+
+  getLighting() {
+    return this.latestLighting || {
+      faceLuminance: 50,
+      ambientLuminance: 50,
+      effectiveLuminance: 50,
+      isDark: false
+    };
   }
 
   _initDetector() {
@@ -109,25 +120,24 @@ class FacePresenceDetector {
     let details = {};
 
     try {
+      const cvResult = this._detectFaceLocalCV(videoOrCanvas);
+      detected = cvResult.detected;
+      confidence = cvResult.confidence;
+      details = cvResult;
+
       if (this.detectorBackend === 'native' && this.nativeDetector) {
         try {
           const faces = await this.nativeDetector.detect(videoOrCanvas);
           if (faces && faces.length > 0) {
             detected = true;
             confidence = 0.95;
-            details = { facesCount: faces.length, source: 'native-shape-detector' };
+            details.facesCount = faces.length;
+            details.source = 'native-shape-detector';
           }
         } catch (_) {
           // Fall back seamlessly to local-cv if native detector encounters format or device issue
           this.detectorBackend = 'local-cv';
         }
-      }
-
-      if (this.detectorBackend === 'local-cv') {
-        const cvResult = this._detectFaceLocalCV(videoOrCanvas);
-        detected = cvResult.detected;
-        confidence = cvResult.confidence;
-        details = cvResult;
       }
 
       this._updateTemporalState(detected, confidence, details);
@@ -136,16 +146,18 @@ class FacePresenceDetector {
         this.onDetectionSample({
           detected,
           confidence,
-          isFacePresent: this.isFacePresent,
-          backend: this.detectorBackend
+          isFacePresent: this.isFacePresent(),
+          backend: this.detectorBackend,
+          lighting: this.latestLighting
         });
       }
 
       return {
         detected,
         confidence,
-        isFacePresent: this.isFacePresent,
-        backend: this.detectorBackend
+        isFacePresent: this.isFacePresent(),
+        backend: this.detectorBackend,
+        lighting: this.latestLighting
       };
 
     } finally {
@@ -154,12 +166,14 @@ class FacePresenceDetector {
   }
 
   /**
-   * Fast, privacy-preserving Local Computer Vision Face-Presence Analysis.
-   * Analyzes an 80x60 downscaled frame for anthropometric human face features:
+   * Fast, privacy-preserving Local Computer Vision Face-Presence Analysis & Lighting Metering.
+   * Analyzes an 80x60 downscaled frame for anthropometric human face features & lighting:
    * 1. Skin Chrominance in YCbCr space (universal across diverse human skin tones:
-   *    Cb in [77, 127], Cr in [133, 173], Y in [28, 240]).
-   * 2. Vertical cluster aspect ratio (head/face vertical oval ratio ~ 1.15 to 1.75).
+   *    Cb in [77, 127], Cr in [133, 173], Y in [14, 245]).
+   * 2. Vertical cluster aspect ratio (head/face vertical oval ratio ~ 1.02 to 2.1).
    * 3. Eye/Eyebrow horizontal luminance valley (upper facial contrast ratio).
+   * 4. Multi-zone lighting metering: face region luminance, ambient background luminance,
+   *    and composite effective luminance.
    */
   _detectFaceLocalCV(source) {
     const W = 80;
@@ -171,7 +185,13 @@ class FacePresenceDetector {
         data = source.data;
       } else {
         const ctx = this._ensureCanvas(80, 60);
-        if (!ctx) return { detected: false, confidence: 0 };
+        if (!ctx) {
+          return {
+            detected: false,
+            confidence: 0,
+            lighting: { faceLuminance: 50, ambientLuminance: 50, effectiveLuminance: 50, isDark: false }
+          };
+        }
         ctx.drawImage(source, 0, 0, W, H);
         const img = ctx.getImageData(0, 0, W, H);
         data = img.data;
@@ -179,6 +199,15 @@ class FacePresenceDetector {
 
       let skinCount = 0;
       let centerSkinCount = 0;
+      let skinLumSum = 0;
+      let centerSkinLumSum = 0;
+      let totalLumSum = 0;
+      let totalSampleCount = 0;
+      let centerLumSum = 0;
+      let centerSampleCount = 0;
+      let peripheralLumSum = 0;
+      let peripheralSampleCount = 0;
+
       let minX = W, maxX = 0, minY = H, maxY = 0;
 
       // Upper and middle facial region luminance tracking
@@ -201,13 +230,27 @@ class FacePresenceDetector {
           const Cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
           const Cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
 
-          // Standard human skin chrominance locus test
-          const isSkin = (Cb >= 77 && Cb <= 127) && (Cr >= 133 && Cr <= 173) && (Y >= 28 && Y <= 245);
+          totalLumSum += Y;
+          totalSampleCount++;
+
+          if (isCenterX && isCenterY) {
+            centerLumSum += Y;
+            centerSampleCount++;
+          } else {
+            peripheralLumSum += Y;
+            peripheralSampleCount++;
+          }
+
+          // Standard human skin chrominance locus test:
+          // In standard light Y in [28, 245]; in dark rooms / low-light Y in [14, 245]
+          const isSkin = (Cb >= 77 && Cb <= 127) && (Cr >= 133 && Cr <= 173) && (Y >= 14 && Y <= 245);
 
           if (isSkin) {
             skinCount++;
+            skinLumSum += Y;
             if (isCenterX && isCenterY) {
               centerSkinCount++;
+              centerSkinLumSum += Y;
             }
             if (x < minX) minX = x;
             if (x > maxX) maxX = x;
@@ -226,47 +269,92 @@ class FacePresenceDetector {
         }
       }
 
+      // Compute ambient, face, and effective composite luminance
+      const avgCenterLum = centerSampleCount > 0 ? (centerLumSum / centerSampleCount) : 50;
+      const avgPeripheralLum = peripheralSampleCount > 0 ? (peripheralLumSum / peripheralSampleCount) : 50;
+      const avgTotalLum = totalSampleCount > 0 ? (totalLumSum / totalSampleCount) : 50;
+
       // Minimum cluster size (~3% to 65% of sampled frame)
       const totalSampledPixels = (W / 2) * (H / 2);
       const skinRatio = skinCount / totalSampledPixels;
       const centerSkinRatio = centerSkinCount / (26 * 21);
 
-      if (skinCount < 35 || centerSkinRatio < 0.08 || skinRatio > 0.85) {
-        return { detected: false, confidence: 0, reason: 'insufficient_skin_cluster' };
+      // In dark environments (e.g. room lights OFF), skin luminance is low (< 28),
+      // but if face was recently present and center area is occupied by human silhouette,
+      // maintain face presence detection.
+      const isExtremeDark = (centerLumSum / Math.max(1, centerSampleCount)) < 30;
+      let detected = false;
+      let confidence = 0.2;
+
+      if (skinCount >= 35 && centerSkinRatio >= 0.08 && skinRatio <= 0.85) {
+        // Cluster bounding dimensions & aspect ratio
+        const clusterW = Math.max(1, maxX - minX);
+        const clusterH = Math.max(1, maxY - minY);
+        const aspectRatio = clusterH / clusterW;
+
+        // Human face/head aspect ratio typically ranges between 1.02 and 2.1
+        const validAspect = aspectRatio >= 1.02 && aspectRatio <= 2.1;
+
+        // Facial luminance contrast: Eyes/brows create a slight luminance dip relative to cheeks
+        let hasFacialContrast = true;
+        if (upperCount > 10 && midCount > 10) {
+          const avgUpper = upperLumSum / upperCount;
+          const avgMid = midLumSum / midCount;
+          // Upper eye/brow region is typically equal or darker than cheek region
+          hasFacialContrast = (avgUpper <= avgMid * 1.18);
+        }
+
+        detected = validAspect && hasFacialContrast && centerSkinCount >= 25;
+        confidence = detected
+          ? Math.min(0.92, Math.max(0.65, centerSkinRatio * 1.4))
+          : 0.2;
+      } else if (isExtremeDark && this._facePresentState && centerSampleCount > 0) {
+        // Face was already confirmed present and room lights just went OFF or user entered dark room:
+        detected = true;
+        confidence = 0.70;
       }
 
-      // Cluster bounding dimensions & aspect ratio
-      const clusterW = Math.max(1, maxX - minX);
-      const clusterH = Math.max(1, maxY - minY);
-      const aspectRatio = clusterH / clusterW;
-
-      // Human face/head aspect ratio typically ranges between 1.05 and 1.95
-      const validAspect = aspectRatio >= 1.02 && aspectRatio <= 2.1;
-
-      // Facial luminance contrast: Eyes/brows create a slight luminance dip relative to cheeks
-      let hasFacialContrast = true;
-      if (upperCount > 10 && midCount > 10) {
-        const avgUpper = upperLumSum / upperCount;
-        const avgMid = midLumSum / midCount;
-        // Upper eye/brow region is typically equal or darker than cheek region
-        hasFacialContrast = (avgUpper <= avgMid * 1.18);
+      let faceLuminance;
+      if (skinCount >= 20) {
+        faceLuminance = Math.round(skinLumSum / skinCount);
+      } else if (detected) {
+        faceLuminance = Math.round(avgCenterLum);
+      } else {
+        faceLuminance = Math.round(avgCenterLum);
       }
 
-      const detected = validAspect && hasFacialContrast && centerSkinCount >= 25;
-      const confidence = detected
-        ? Math.min(0.92, Math.max(0.65, centerSkinRatio * 1.4))
-        : 0.2;
+      const ambientLuminance = Math.round(avgPeripheralLum);
+      const effectiveLuminance = detected
+        ? Math.round(0.70 * faceLuminance + 0.30 * ambientLuminance)
+        : Math.round(avgTotalLum);
+
+      const lighting = {
+        faceLuminance,
+        ambientLuminance,
+        effectiveLuminance,
+        isDark: effectiveLuminance < 68
+      };
 
       return {
         detected,
         confidence,
         centerSkinRatio,
-        aspectRatio,
-        skinCount
+        skinCount,
+        lighting
       };
 
     } catch (e) {
-      return { detected: false, confidence: 0, error: e.message };
+      return {
+        detected: false,
+        confidence: 0,
+        error: e.message,
+        lighting: {
+          faceLuminance: 50,
+          ambientLuminance: 50,
+          effectiveLuminance: 50,
+          isDark: false
+        }
+      };
     }
   }
 
@@ -276,6 +364,12 @@ class FacePresenceDetector {
    */
   _updateTemporalState(frameDetected, confidence, details) {
     const now = Date.now();
+    this.latestLighting = details?.lighting || {
+      faceLuminance: 50,
+      ambientLuminance: 50,
+      effectiveLuminance: 50,
+      isDark: false
+    };
 
     if (frameDetected) {
       this.consecutivePresentCount++;
@@ -287,7 +381,7 @@ class FacePresenceDetector {
         if (!this._facePresentState) {
           this._facePresentState = true;
           if (typeof this.onFaceStateChange === 'function') {
-            this.onFaceStateChange(true, { confidence, details });
+            this.onFaceStateChange(true, { confidence, details, lighting: this.latestLighting });
           }
         }
       }
@@ -306,11 +400,20 @@ class FacePresenceDetector {
             this.onFaceStateChange(false, {
               reason: 'grace_period_expired',
               elapsedSinceLastSeen,
-              details
+              details,
+              lighting: this.latestLighting
             });
           }
         }
       }
+    }
+
+    if (typeof this.onLightingUpdate === 'function') {
+      this.onLightingUpdate({
+        isFacePresent: this.isFacePresent(),
+        lighting: this.latestLighting,
+        confidence
+      });
     }
   }
 
@@ -325,7 +428,8 @@ class FacePresenceDetector {
     return {
       detected: res.detected,
       isFacePresent: this.isFacePresent(),
-      confidence: res.confidence
+      confidence: res.confidence,
+      lighting: res.lighting
     };
   }
 }

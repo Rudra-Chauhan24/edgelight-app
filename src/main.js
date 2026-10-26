@@ -1,8 +1,10 @@
 const { app, BrowserWindow, screen, ipcMain, Tray, Menu, nativeImage, globalShortcut, session, clipboard, shell, powerMonitor } = require('electron');
-const { execFile } = require('child_process');
+const { execFile, fork } = require('child_process');
 const path = require('path');
 const os = require('os');
 const https = require('https');
+const http = require('http');
+const fs = require('fs');
 const { LicenseManager } = require('./license-manager');
 const { AppUpdater } = require('./updater');
 
@@ -20,6 +22,46 @@ try {
     app.setPath('userData', persistentUserData);
   }
 } catch (_) {}
+
+// ── LOCAL LICENSING BACKEND SERVICE INTEGRATION ────────────────────
+let localBackendProcess = null;
+
+function ensureLocalBackendService() {
+  const backendServerPath = path.resolve(__dirname, '..', 'backend', 'server.js');
+  if (!fs.existsSync(backendServerPath)) return;
+
+  const req = http.get('http://127.0.0.1:4000/api/health', { timeout: 1000 }, (res) => {
+    res.resume();
+  });
+
+  req.on('error', () => {
+    try {
+      const backendDir = path.resolve(__dirname, '..', 'backend');
+      localBackendProcess = fork(backendServerPath, [], {
+        cwd: backendDir,
+        env: { ...process.env, PORT: '4000', ELECTRON_RUN_AS_NODE: '1' },
+        stdio: 'ignore'
+      });
+      localBackendProcess.unref();
+      console.log('[Backend] Local licensing backend service spawned on port 4000.');
+    } catch (err) {
+      console.warn('[Backend] Could not spawn local backend service:', err.message);
+    }
+  });
+
+  req.on('timeout', () => {
+    req.destroy();
+  });
+}
+
+function stopLocalBackendService() {
+  if (localBackendProcess) {
+    try {
+      localBackendProcess.kill();
+    } catch (_) {}
+    localBackendProcess = null;
+  }
+}
 
 // ── INTERNET CONNECTIVITY MONITOR ─────────────────────────────────
 let isOnline = true;
@@ -392,6 +434,36 @@ function stopOtaInterval() {
   }
 }
 
+// Helper to resolve active display for current window or cursor
+function getActiveDisplay() {
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      const curBounds = mainWindow.getBounds();
+      const display = screen.getDisplayMatching(curBounds);
+      if (display) return display;
+    }
+  } catch (_) {}
+  return screen.getPrimaryDisplay();
+}
+
+// Handle display resolution, scaling, or monitor connect/disconnect changes
+function handleDisplayChange() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    const display = getActiveDisplay();
+    const bounds = display.bounds;
+    mainWindow.setBounds(bounds);
+    ensureTopmost();
+    try {
+      mainWindow.webContents.send('display-configuration-changed', {
+        bounds: display.bounds,
+        workArea: display.workArea,
+        scaleFactor: display.scaleFactor,
+        displayId: display.id
+      });
+    } catch (_) {}
+  }
+}
+
 function createWindow() {
   const primaryDisplay = screen.getPrimaryDisplay();
   const { x, y, width, height } = primaryDisplay.bounds;
@@ -486,36 +558,6 @@ function createWindow() {
       } catch (e) {}
     }, 15 * 60 * 1000);
   });
-
-  // Helper to resolve active display for current window or cursor
-  const getActiveDisplay = () => {
-    try {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        const curBounds = mainWindow.getBounds();
-        const display = screen.getDisplayMatching(curBounds);
-        if (display) return display;
-      }
-    } catch (_) {}
-    return screen.getPrimaryDisplay();
-  };
-
-  // Handle display resolution, scaling, or monitor connect/disconnect changes
-  const handleDisplayChange = () => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      const display = getActiveDisplay();
-      const bounds = display.bounds;
-      mainWindow.setBounds(bounds);
-      ensureTopmost();
-      try {
-        mainWindow.webContents.send('display-configuration-changed', {
-          bounds: display.bounds,
-          workArea: display.workArea,
-          scaleFactor: display.scaleFactor,
-          displayId: display.id
-        });
-      } catch (_) {}
-    }
-  };
 
   screen.on('display-metrics-changed', handleDisplayChange);
   screen.on('display-added', handleDisplayChange);
@@ -923,7 +965,12 @@ ipcMain.handle('activate-admin-lifetime', async (event, params) => {
     if (!token || typeof token !== 'string') {
       return { success: false, error: 'Admin authorization token is required.' };
     }
-    const res = await licenseManager.activateAdminLifetime(token, identity);
+    let res = await licenseManager.activateAdminLifetime(token, identity);
+    if (!res.success && res.error && res.error.includes('Connection failed') && (!process.env.BACKEND_URL || process.env.BACKEND_URL.includes('localhost') || process.env.BACKEND_URL.includes('127.0.0.1'))) {
+      ensureLocalBackendService();
+      await new Promise(r => setTimeout(r, 1200));
+      res = await licenseManager.activateAdminLifetime(token, identity);
+    }
     if (res && res.success && mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('license-status-changed', res.licenseInfo);
     }
@@ -1269,6 +1316,7 @@ app.whenReady().then(async () => {
   registerShortcuts();
   startWebcamMonitoring();
   startConnectivityMonitor();
+  ensureLocalBackendService();
 
   // Handle Windows Sleep / Suspend / Resume gracefully
   if (powerMonitor) {
@@ -1306,6 +1354,7 @@ app.whenReady().then(async () => {
 });
 
 app.on('will-quit', () => {
+  stopLocalBackendService();
   licenseManager.stop();
   stopKeepTop();
   stopCursorTracker();
