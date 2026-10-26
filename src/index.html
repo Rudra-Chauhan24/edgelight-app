@@ -77,17 +77,17 @@
       <input id="thickness" type="range" min="20" max="180" value="96" step="2" aria-label="Ring thickness">
     </div>
 
-    <!-- 4. Auto Face & Camera Detection Toggle -->
+    <!-- 4. Automatic Darkness Light Toggle -->
     <div class="ctrl auto-ctrl">
       <div class="auto-row">
         <label for="autoFaceSwitch" class="auto-label">
-          <span class="ctrl-icon">👤</span> Auto Face
+          <span class="ctrl-icon">🌙</span> Auto Light
         </label>
-        <button id="autoFaceSwitch" type="button" class="switch-btn active" role="switch" aria-checked="true" aria-label="Toggle Auto Face and Camera Detection">
+        <button id="autoFaceSwitch" type="button" class="switch-btn active" role="switch" aria-checked="true" aria-label="Toggle Auto Edge Light based on darkness and visibility">
           <span class="switch-handle"></span>
         </button>
       </div>
-      <div id="faceStatusHint" class="face-status-hint">Auto lighting on face presence</div>
+      <div id="faceStatusHint" class="face-status-hint">Auto turns ON when dark, OFF when bright</div>
     </div>
 
     <!-- Divider -->

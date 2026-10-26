@@ -1820,25 +1820,24 @@
       liveLux.title = `Face & ambient light: ${currentLux} (threshold: ${threshold})`;
     }
 
-    if (!isFacePresent) {
-      darkConfirmationFrames = 0;
-      brightConfirmationFrames = 0;
-      if (faceStatusHint) {
-        faceStatusHint.textContent = '👤 Waiting for face…';
-        faceStatusHint.classList.remove('detected');
-      }
-      return;
-    }
+    // Automatic Edge Light ON/OFF based on darkness and visibility
+    const isDark = currentLux < (threshold - HYSTERESIS);
+    const isBright = currentLux > (threshold + HYSTERESIS);
 
-    // Face is present: update status hint
+    // Update status hint
     if (faceStatusHint) {
-      faceStatusHint.classList.add('detected');
-      if (currentLux < threshold - HYSTERESIS) {
-        faceStatusHint.textContent = `👤 Face detected (low light: ${currentLux})`;
-      } else if (currentLux > threshold + HYSTERESIS) {
-        faceStatusHint.textContent = `👤 Face detected (well lit: ${currentLux})`;
+      if (isDark) {
+        faceStatusHint.classList.add('detected');
+        faceStatusHint.textContent = isFacePresent
+          ? `🌙 Dark detected (${currentLux}) — Auto Light ON ✨`
+          : `🌑 Low light (${currentLux}) — Auto Light ON ✨`;
+      } else if (isBright) {
+        faceStatusHint.classList.remove('detected');
+        faceStatusHint.textContent = isFacePresent
+          ? `👤 Face detected (well lit: ${currentLux})`
+          : `☀️ Ambient bright (${currentLux}) — Edge Light off`;
       } else {
-        faceStatusHint.textContent = `👤 Face detected (light: ${currentLux})`;
+        faceStatusHint.textContent = `🌙 Balanced light (${currentLux})`;
       }
     }
 
@@ -1922,10 +1921,10 @@
     faceDetector.onFaceStateChange = (isPresent, info) => {
       if (faceStatusHint) {
         if (isPresent) {
-          faceStatusHint.textContent = '👤 Face detected (active)';
+          faceStatusHint.textContent = '🌙 Auto Light active';
           faceStatusHint.classList.add('detected');
         } else {
-          faceStatusHint.textContent = '👤 Waiting for face…';
+          faceStatusHint.textContent = 'Auto turns ON when dark, OFF when bright';
           faceStatusHint.classList.remove('detected');
         }
       }
@@ -2112,10 +2111,17 @@
       faceDetector.setEnabled(autoFaceEnabled);
     }
     if (autoFaceEnabled) {
-      showStatus('👤 Auto face activation active ✨', 2000);
+      showStatus('🌙 Auto Light active — turns ON when dark, OFF when bright ✨', 2400);
+      if (faceStatusHint) {
+        faceStatusHint.textContent = 'Auto turns ON when dark, OFF when bright';
+      }
       startFaceDetectionCamera();
     } else {
-      showStatus('Auto face activation paused', 1800);
+      showStatus('Auto Light paused', 1800);
+      if (faceStatusHint) {
+        faceStatusHint.textContent = 'Auto Light off';
+        faceStatusHint.classList.remove('detected');
+      }
       stopFaceDetectionCamera(true);
       if (wasTurnedOnByFace && state.on) {
         wasTurnedOnByFace = false;
