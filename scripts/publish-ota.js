@@ -41,7 +41,7 @@ const VERSION    = (process.argv[2] || pkgVersion).replace(/^v/i, '').trim();
 const DL_URL     = process.argv[3] ||
   `https://github.com/Rudra-Chauhan24/edgelight-app/releases/download/v${VERSION}/Edge.Light.Setup.${VERSION}.exe`;
 
-const RELEASE_NOTES = `✨ Edge Light v1.0.15 Release:\n` +
+const RELEASE_NOTES = `✨ Edge Light v1.0.16 Release:\n` +
   `• Firebase unique device telemetry & Hardware ID tracking with strict duplicate prevention.\n` +
   `• Enhanced click-through and interaction handling across all verification modals and dialogs.\n` +
   `• Hardened payment verification with atomic single-use claim protection and anti-tamper locking.\n` +

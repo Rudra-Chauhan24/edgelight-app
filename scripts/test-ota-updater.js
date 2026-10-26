@@ -33,7 +33,7 @@ it('isNewerVersion compares versions correctly', () => {
 // 3. Test Case 1: Installed version = latest version -> no update popup
 it('Case 1: When installed version = latest released version, updateAvailable is false', async () => {
   const checkProbe = await new AppUpdater().checkForUpdates();
-  const latestVer = checkProbe.latestVersion || '1.0.15';
+  const latestVer = checkProbe.latestVersion || '1.0.16';
   const currentUpdater = new AppUpdater({ currentVersion: latestVer });
   const checkResult = await currentUpdater.checkForUpdates();
   

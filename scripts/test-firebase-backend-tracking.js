@@ -96,7 +96,7 @@ class MockFirestore {
     assert(doc.lastSeenAt, 'lastSeenAt must be present');
     assert.strictEqual(doc.status, 'trial');
     assert.strictEqual(doc.trialStatus, 'active');
-    assert.strictEqual(doc.appVersion, '1.0.15');
+    assert.strictEqual(doc.appVersion, '1.0.16');
   });
 
   // ── TEST 2: Same Hardware ID reopened → updates record, no duplicate ──────
@@ -156,10 +156,10 @@ class MockFirestore {
     lm.vault.read = () => vaultData;
     lm.vault.write = (d) => { vaultData = d; };
 
-    // App updated to 1.0.15
+    // App updated to 1.0.16
     lm.getTelemetry = () => ({
       hwid: hwid,
-      appVersion: '1.0.15',
+      appVersion: '1.0.16',
       lastSeenAt: new Date().toISOString(),
       lastActiveAt: new Date().toISOString()
     });
@@ -168,7 +168,7 @@ class MockFirestore {
 
     assert.strictEqual(mockDb.getUniqueDeviceCount(), 1, 'Total unique devices must remain 1 after update');
     const updatedDoc = mockDb.documents.get(hwid);
-    assert.strictEqual(updatedDoc.appVersion, '1.0.15', 'Version must be updated to new version');
+    assert.strictEqual(updatedDoc.appVersion, '1.0.16', 'Version must be updated to new version');
     assert.strictEqual(updatedDoc.firstSeenAt, '2026-09-15T10:00:00.000Z', 'Original firstSeenAt must be preserved');
     assert.strictEqual(updatedDoc.status, 'approved', 'License status must be preserved');
     assert.strictEqual(updatedDoc.planId, 'quarterly', 'Plan ID must be preserved');

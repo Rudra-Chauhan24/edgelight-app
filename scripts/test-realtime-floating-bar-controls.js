@@ -7,7 +7,7 @@ console.log('🧪 Starting Edge Light Real-Time Floating Bar Controls Test Suite
 let lightStateChangedCalls = [];
 let lm = new LicenseManager();
 
-ipcMain.handle('get-app-version', () => '1.0.15');
+ipcMain.handle('get-app-version', () => '1.0.16');
 ipcMain.handle('toggle-fullscreen', () => false);
 ipcMain.handle('is-fullscreen', () => false);
 ipcMain.handle('get-license-info', () => lm.getStatus());

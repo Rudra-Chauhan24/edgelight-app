@@ -27,6 +27,7 @@ try {
 let localBackendProcess = null;
 
 function ensureLocalBackendService() {
+  if (localBackendProcess && !localBackendProcess.killed) return;
   const backendServerPath = path.resolve(__dirname, '..', 'backend', 'server.js');
   if (!fs.existsSync(backendServerPath)) return;
 
@@ -559,6 +560,9 @@ function createWindow() {
     }, 15 * 60 * 1000);
   });
 
+  screen.removeListener('display-metrics-changed', handleDisplayChange);
+  screen.removeListener('display-added', handleDisplayChange);
+  screen.removeListener('display-removed', handleDisplayChange);
   screen.on('display-metrics-changed', handleDisplayChange);
   screen.on('display-added', handleDisplayChange);
   screen.on('display-removed', handleDisplayChange);
@@ -1191,59 +1195,59 @@ function checkWebcamUsage() {
 }
 
 function processWebcamRegistry(stdout) {
-  if (!stdout) return;
-
-  const sections = stdout.split(/(?=HKEY_)/i);
   let inUse = false;
   const activeApps = [];
 
-  const filetimeNow = (BigInt(Date.now()) + 11644473600000n) * 10000n;
-  const maxAge = BigInt(Math.max(3600, Math.floor(os.uptime() + 60))) * 10000000n;
+  if (stdout) {
+    const sections = stdout.split(/(?=HKEY_)/i);
+    const filetimeNow = (BigInt(Date.now()) + 11644473600000n) * 10000n;
+    const maxAge = BigInt(Math.max(3600, Math.floor(os.uptime() + 60))) * 10000000n;
 
-  for (const section of sections) {
-    const lines = section.trim().split(/\r?\n/);
-    if (!lines.length) continue;
-    const header = lines[0].trim();
-    const lowerHeader = header.toLowerCase();
+    for (const section of sections) {
+      const lines = section.trim().split(/\r?\n/);
+      if (!lines.length) continue;
+      const header = lines[0].trim();
+      const lowerHeader = header.toLowerCase();
 
-    // Exclude Edge Light itself and Electron dev environment
-    if (
-      lowerHeader.includes('edge light') ||
-      lowerHeader.includes('edgelight') ||
-      lowerHeader.includes('electron.exe')
-    ) {
-      continue;
-    }
+      // Exclude Edge Light itself and Electron dev environment
+      if (
+        lowerHeader.includes('edge light') ||
+        lowerHeader.includes('edgelight') ||
+        lowerHeader.includes('electron.exe')
+      ) {
+        continue;
+      }
 
-    let startVal = null;
-    let stopVal = null;
+      let startVal = null;
+      let stopVal = null;
 
-    for (const line of lines) {
-      const matchStart = line.match(/LastUsedTimeStart\s+REG_QWORD\s+(0x[0-9a-fA-F]+|\d+)/i);
-      if (matchStart) startVal = matchStart[1];
-      const matchStop = line.match(/LastUsedTimeStop\s+REG_QWORD\s+(0x[0-9a-fA-F]+|\d+)/i);
-      if (matchStop) stopVal = matchStop[1];
-    }
+      for (const line of lines) {
+        const matchStart = line.match(/LastUsedTimeStart\s+REG_QWORD\s+(0x[0-9a-fA-F]+|\d+)/i);
+        if (matchStart) startVal = matchStart[1];
+        const matchStop = line.match(/LastUsedTimeStop\s+REG_QWORD\s+(0x[0-9a-fA-F]+|\d+)/i);
+        if (matchStop) stopVal = matchStop[1];
+      }
 
-    if (startVal !== null) {
-      try {
-        const start = BigInt(startVal);
-        const stop = stopVal !== null ? BigInt(stopVal) : 0n;
+      if (startVal !== null) {
+        try {
+          const start = BigInt(startVal);
+          const stop = stopVal !== null ? BigInt(stopVal) : 0n;
 
-        // Verify entry is not stale from a previous boot session
-        const isStale = (filetimeNow > start) && ((filetimeNow - start) > maxAge);
-        if (isStale) continue;
+          // Verify entry is not stale from a previous boot session
+          const isStale = (filetimeNow > start) && ((filetimeNow - start) > maxAge);
+          if (isStale) continue;
 
-        // When an application or website accesses the camera,
-        // Windows sets LastUsedTimeStop to 0x0 or start > stop
-        if (stop === 0n || start > stop) {
-          inUse = true;
-          const appName = header.split('\\').pop() || header;
-          if (!activeApps.includes(appName)) {
-            activeApps.push(appName);
+          // When an application or website accesses the camera,
+          // Windows sets LastUsedTimeStop to 0x0 or start > stop
+          if (stop === 0n || start > stop) {
+            inUse = true;
+            const appName = header.split('\\').pop() || header;
+            if (!activeApps.includes(appName)) {
+              activeApps.push(appName);
+            }
           }
-        }
-      } catch (e) {}
+        } catch (e) {}
+      }
     }
   }
 
@@ -1362,6 +1366,10 @@ app.on('will-quit', () => {
   stopWebcamMonitoring();
   stopConnectivityMonitor();
   globalShortcut.unregisterAll();
+  if (paymentWindow && !paymentWindow.isDestroyed()) {
+    try { paymentWindow.destroy(); } catch (_) {}
+    paymentWindow = null;
+  }
 });
 
 app.on('window-all-closed', () => {

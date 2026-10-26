@@ -491,7 +491,7 @@ class LicenseManager {
   }
 
   getTelemetry() {
-    let appVer = '1.0.15';
+    let appVer = '1.0.16';
     try {
       if (typeof app !== 'undefined' && app?.getVersion) {
         appVer = app.getVersion();

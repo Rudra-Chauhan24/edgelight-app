@@ -1203,9 +1203,6 @@
     }
   });
 
-
-  window.addEventListener('resize', resize);
-
   // Global IPC Listeners from Electron Main Process
   if (window.edgeLightAPI) {
     window.edgeLightAPI.onToggleLight(() => {
@@ -1641,13 +1638,15 @@
     if (isSamplingAmbient) return;
     if (!navigator.mediaDevices?.getUserMedia) return;
     isSamplingAmbient = true;
+    let probeStream = null;
+    let probeVideo = null;
     try {
-      const probeStream = await navigator.mediaDevices.getUserMedia({
+      probeStream = await navigator.mediaDevices.getUserMedia({
         video: { width: { ideal: 160 }, height: { ideal: 120 } },
         audio: false
       });
       if (probeStream) {
-        const probeVideo = document.createElement('video');
+        probeVideo = document.createElement('video');
         probeVideo.muted = true;
         probeVideo.srcObject = probeStream;
         await probeVideo.play().catch(() => {});
@@ -1680,16 +1679,19 @@
             showStatus(`🌑 Low light (${lux}) — Edge Light On ✨`, 2600);
           }
         }
-        // Immediately stop and release camera tracks so camera is NOT kept running!
-        probeStream.getTracks().forEach(t => {
-          try { t.stop(); } catch (e) {}
-        });
-        probeVideo.srcObject = null;
       }
     } catch (e) {
       // Normal when another application has exclusive lock on camera
       // Video call host application is completely unaffected.
     } finally {
+      if (probeStream) {
+        try {
+          probeStream.getTracks().forEach(t => t.stop());
+        } catch (_) {}
+      }
+      if (probeVideo) {
+        probeVideo.srcObject = null;
+      }
       isSamplingAmbient = false;
     }
   }
@@ -1962,9 +1964,14 @@
     };
   }
 
+  let isStartingFaceCamera = false;
+  let faceLoopTimer = null;
+
   async function startFaceDetectionCamera() {
     if (!autoFaceEnabled || !faceDetector) return;
+    if (isStartingFaceCamera) return;
     if (faceStream && faceStream.active) return;
+    isStartingFaceCamera = true;
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
         if (faceStatusHint) faceStatusHint.textContent = '👤 Camera API unavailable';
@@ -2035,13 +2042,16 @@
           }
         }, 15000);
       }
+    } finally {
+      isStartingFaceCamera = false;
     }
   }
 
   async function runFaceProcessingLoop() {
     if (!faceDetectionLoopActive || !autoFaceEnabled || !faceDetector) return;
     if (!faceVideoEl || faceVideoEl.readyState < 2) {
-      setTimeout(runFaceProcessingLoop, 150);
+      if (faceLoopTimer) clearTimeout(faceLoopTimer);
+      faceLoopTimer = setTimeout(runFaceProcessingLoop, 150);
       return;
     }
 
@@ -2050,12 +2060,17 @@
     } catch (_) {}
 
     if (faceDetectionLoopActive && autoFaceEnabled) {
-      setTimeout(runFaceProcessingLoop, 140);
+      if (faceLoopTimer) clearTimeout(faceLoopTimer);
+      faceLoopTimer = setTimeout(runFaceProcessingLoop, 140);
     }
   }
 
   function stopFaceDetectionCamera(userInitiated = false) {
     faceDetectionLoopActive = false;
+    if (faceLoopTimer) {
+      clearTimeout(faceLoopTimer);
+      faceLoopTimer = null;
+    }
     clearTimeout(faceRetryTimer);
     faceRetryTimer = null;
     if (faceStream) {
@@ -4029,10 +4044,10 @@
       window.edgeLightAPI.getAppVersion().then((ver) => {
         if (ver) versionBadgeEl.textContent = `v${ver}`;
       }).catch(() => {
-        versionBadgeEl.textContent = 'v1.0.15';
+        versionBadgeEl.textContent = 'v1.0.16';
       });
     } else {
-      versionBadgeEl.textContent = 'v1.0.15';
+      versionBadgeEl.textContent = 'v1.0.16';
     }
 
     versionBadgeEl.style.cursor = 'pointer';
