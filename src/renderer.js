@@ -396,55 +396,59 @@
     // ── LAYER A: OUTER SOFT SPILL (feathered toward bezel) ────────────
     {
       const spill   = new Path2D();
-      const spillX  = outerX - 4;
-      const spillY  = outerY - 4;
-      const spillW  = outerW + 8;
-      const spillH  = outerH + 8;
-      const spillR  = outerR + 4;
+      const spillX  = outerX - 6;
+      const spillY  = outerY - 6;
+      const spillW  = outerW + 12;
+      const spillH  = outerH + 12;
+      const spillR  = outerR + 6;
       squirclePath(spill, spillX, spillY, spillW, spillH, spillR);
       squirclePath(spill, innerX, innerY, innerW, innerH, innerR);
       ctx.save();
-      ctx.filter = 'blur(8px)';
-      ctx.fillStyle = `rgba(${r},${g},${b},${masterOpacity * 0.26})`;
+      ctx.filter = 'blur(10px)';
+      ctx.fillStyle = `rgba(${r},${g},${b},${masterOpacity * 0.40})`;
       ctx.fill(spill, 'evenodd');
       ctx.filter = 'none';
       ctx.restore();
     }
 
-    // ── LAYER B: CORE BAND — golden/amber border when warm, daylight when cool ─
+    // ── LAYER B: CORE BAND — full-opacity solid illumination ──────────
     const corePath = new Path2D();
     squirclePath(corePath, outerX, outerY, outerW, outerH, outerR);
     squirclePath(corePath, innerX, innerY, innerW, innerH, innerR);
     ctx.save();
-    ctx.fillStyle = `rgba(${r},${g},${b},${masterOpacity * 0.92})`;
+    ctx.fillStyle = `rgba(${r},${g},${b},${masterOpacity * 1.0})`;
     ctx.fill(corePath, 'evenodd');
     ctx.restore();
 
-    // ── LAYER C: INNER SOFT FEATHER (gradient falloff inward) ─────────
+    // ── LAYER C: INWARD SOFT RADIANT DIFFUSION (toward user's face) ───
+    // Softly projects radiant light inward past the inner bezel boundary,
+    // illuminating the user's face naturally during video calls with smooth falloff.
     {
-      const featherDepth = Math.max(1, Math.round(animThick * 0.45));
-      const fInX = innerX - featherDepth;
-      const fInY = innerY - featherDepth;
-      const fInW = innerW + featherDepth * 2;
-      const fInH = innerH + featherDepth * 2;
-      const fInR = Math.max(2, innerR - featherDepth);
-      const featherPath = new Path2D();
-      squirclePath(featherPath, fInX, fInY, fInW, fInH, fInR);
-      squirclePath(featherPath, innerX, innerY, innerW, innerH, innerR);
-      ctx.save();
-      ctx.filter = `blur(${Math.max(1, Math.round(featherDepth * 0.6))}px)`;
-      ctx.fillStyle = `rgba(${r},${g},${b},${masterOpacity * 0.55})`;
-      ctx.fill(featherPath, 'evenodd');
-      ctx.filter = 'none';
-      ctx.restore();
+      const inwardDepth = Math.max(8, Math.round(animThick * 0.40));
+      const inRadiantX  = innerX + inwardDepth;
+      const inRadiantY  = innerY + inwardDepth;
+      const inRadiantW  = innerW - inwardDepth * 2;
+      const inRadiantH  = innerH - inwardDepth * 2;
+      const inRadiantR  = Math.max(2, innerR - inwardDepth);
+
+      if (inRadiantW > 0 && inRadiantH > 0) {
+        const inwardPath = new Path2D();
+        squirclePath(inwardPath, innerX, innerY, innerW, innerH, innerR);
+        squirclePath(inwardPath, inRadiantX, inRadiantY, inRadiantW, inRadiantH, inRadiantR);
+        ctx.save();
+        ctx.filter = `blur(${Math.max(4, Math.round(inwardDepth * 0.50))}px)`;
+        ctx.fillStyle = `rgba(${r},${g},${b},${masterOpacity * 0.75})`;
+        ctx.fill(inwardPath, 'evenodd');
+        ctx.filter = 'none';
+        ctx.restore();
+      }
     }
 
-    // ── LAYER D: SOFTLY BLENDED LUMINOUS WHITE CENTER CORE ────────────
-    // When in warm spectrum, center core radiates luminous white that melts
-    // seamlessly into the golden border with ZERO hard demarcation lines.
-    // Clipped to corePath so outer & inner ring boundaries stay 100% crisp.
-    const warmFactor = renderState.temp <= 0.50 ? (0.50 - renderState.temp) / 0.50 : 0;
-    if (warmFactor > 0.02 && animThick >= 12) {
+    // ── LAYER D: HIGH-LUMINANCE WHITE CENTER CORE ─────────────────────
+    // Continuous studio luminous white core that melts seamlessly into the
+    // calibrated color temperature flanks. Active across ALL color temperatures
+    // (warm tungsten, 5000K neutral, and cool daylight) to guarantee strong facial lighting.
+    if (animThick >= 12) {
       ctx.save();
       ctx.clip(corePath, 'evenodd');
 
@@ -459,19 +463,19 @@
         const midPath = new Path2D();
         squirclePath(midPath, midX, midY, midW, midH, midR);
 
-        // Pass 1: Broad ultra-soft diffusion glow (eliminates any line demarcation)
+        // Pass 1: Broad diffusion luminous glow
         ctx.save();
-        ctx.lineWidth = Math.round(animThick * 0.60);
-        ctx.filter = `blur(${Math.round(animThick * 0.42)}px)`;
-        ctx.strokeStyle = `rgba(255, 255, 252, ${masterOpacity * 0.50 * warmFactor})`;
+        ctx.lineWidth = Math.round(animThick * 0.65);
+        ctx.filter = `blur(${Math.max(2, Math.round(animThick * 0.35))}px)`;
+        ctx.strokeStyle = `rgba(255, 255, 255, ${masterOpacity * 0.80})`;
         ctx.stroke(midPath);
         ctx.restore();
 
-        // Pass 2: Smooth center luminous core focus
+        // Pass 2: Peak-intensity center white-hot core
         ctx.save();
-        ctx.lineWidth = Math.round(animThick * 0.30);
-        ctx.filter = `blur(${Math.round(animThick * 0.26)}px)`;
-        ctx.strokeStyle = `rgba(255, 255, 252, ${masterOpacity * 0.65 * warmFactor})`;
+        ctx.lineWidth = Math.round(animThick * 0.32);
+        ctx.filter = `blur(${Math.max(1, Math.round(animThick * 0.16))}px)`;
+        ctx.strokeStyle = `rgba(255, 255, 255, ${masterOpacity * 0.95})`;
         ctx.stroke(midPath);
         ctx.restore();
       }
