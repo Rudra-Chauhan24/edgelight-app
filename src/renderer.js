@@ -97,6 +97,8 @@
   let faceConsecutiveErrors = 0;
   let faceRetryTimer = null;
 
+  let lastSliderInputTime = 0;
+
   // Smoothly interpolated render values (exponential damping)
   const renderState = {
     brightness: 1.0,
@@ -530,22 +532,36 @@
 
     let needsNextFrame = false;
 
-    // Smooth exponential damping over ~90ms (tau = 35ms gives responsive yet fluid glide)
-    const damping = 1 - Math.exp(-dt / 35);
+    // Apple-inspired critically damped spring physics (tau-based exponential decay):
+    // - For direct interactive manipulation (dragging sliders), tau = 20ms gives immediate 1:1 response.
+    // - For ambient studio lighting adjustments (auto camera metering), tau = 130ms gives velvet-smooth lux glide.
+    const isInteractive = Boolean(isPointerDown || (now - lastSliderInputTime < 350));
+    const tauBrightness = isInteractive ? 20 : 130;
+    const dampingBrightness = 1 - Math.exp(-dt / tauBrightness);
+    const dampingInteractive = 1 - Math.exp(-dt / 24);
 
     const targetBrightness = state.brightness;
     const db = targetBrightness - renderState.brightness;
-    if (Math.abs(db) > 0.002) {
-      renderState.brightness += db * damping;
+    if (Math.abs(db) > 0.001) {
+      renderState.brightness += db * dampingBrightness;
       needsNextFrame = true;
+      if (!isInteractive && brightnessInput && !userCustomizedBrightness) {
+        brightnessInput.value = Math.round(renderState.brightness * 100);
+      }
+      if (brightnessVal && !isInteractive) {
+        brightnessVal.textContent = `${Math.round(renderState.brightness * 100)}%`;
+      }
+      if (typeof updateCameraBrightnessPopup === 'function') {
+        updateCameraBrightnessPopup(null, true, { brightness: renderState.brightness, on: state.on });
+      }
     } else {
       renderState.brightness = targetBrightness;
     }
 
     const targetTemp = state.temp;
     const dtTemp = targetTemp - renderState.temp;
-    if (Math.abs(dtTemp) > 0.002) {
-      renderState.temp += dtTemp * damping;
+    if (Math.abs(dtTemp) > 0.001) {
+      renderState.temp += dtTemp * dampingInteractive;
       needsNextFrame = true;
     } else {
       renderState.temp = targetTemp;
@@ -553,8 +569,8 @@
 
     const targetThickness = state.thickness;
     const dThick = targetThickness - renderState.thickness;
-    if (Math.abs(dThick) > 0.05) {
-      renderState.thickness += dThick * damping;
+    if (Math.abs(dThick) > 0.02) {
+      renderState.thickness += dThick * dampingInteractive;
       needsNextFrame = true;
     } else {
       renderState.thickness = targetThickness;
@@ -563,7 +579,7 @@
     const targetHole = state.holeRadius;
     const dHole = targetHole - renderState.holeRadius;
     if (Math.abs(dHole) > 0.5) {
-      renderState.holeRadius += dHole * damping;
+      renderState.holeRadius += dHole * dampingInteractive;
       needsNextFrame = true;
     } else {
       renderState.holeRadius = targetHole;
@@ -786,41 +802,39 @@
 
   // Slider inputs: update targets and smoothly interpolate in canvas
   brightnessInput?.addEventListener('input', () => {
+    lastSliderInputTime = performance.now();
     userCustomizedBrightness = true;
     state.brightness = brightnessInput.value / 100;
     if (brightnessVal) brightnessVal.textContent = `${brightnessInput.value}%`;
     showStatus(`✨ Opacity: ${brightnessInput.value}%`, 1600);
     requestRender();
+    if (typeof updateCameraBrightnessPopup === 'function') {
+      updateCameraBrightnessPopup(faceDetector?.getLighting?.(), faceDetector?.isFacePresent?.(), state);
+    }
   });
 
   tempInput.addEventListener('input', () => {
+    lastSliderInputTime = performance.now();
     const v = Number(tempInput.value);
     state.temp = v / 100;
-    renderState.temp = state.temp;
     // Kelvin readout: 0→3744K, 50→5000K, 100→6500K (linear piecewise)
     const kelvin = v <= 50
       ? Math.round(3744 + (5000 - 3744) * (v / 50))
       : Math.round(5000 + (6500 - 5000) * ((v - 50) / 50));
     if (tempVal) tempVal.textContent = `${kelvin}K`;
     showStatus(`🌡️ Temp: ${kelvin}K`, 1600);
-    if (state.on && renderState.thickScale > 0.002) {
-      drawFrame();
-    }
     requestRender();
   });
 
   function setThickness(val) {
+    lastSliderInputTime = performance.now();
     const min = Number(thicknessInput.min) || 20;
     const max = Number(thicknessInput.max) || 180;
     const clamped = Math.min(max, Math.max(min, Math.round(val)));
     state.thickness = clamped;
-    renderState.thickness = clamped;
     thicknessInput.value = clamped;
     thicknessVal.textContent = `${clamped}px`;
     showStatus(`📐 Thickness: ${clamped}px`, 1600);
-    if (state.on && renderState.thickScale > 0.002) {
-      drawFrame();
-    }
     requestRender();
   }
 
@@ -1982,7 +1996,7 @@
             const darknessRatio = Math.max(0, Math.min(1.0, (threshold - currentLux) / threshold));
             const autoBrightness = Math.min(1.0, Math.max(0.35, 0.35 + darknessRatio * 0.65));
 
-            if (Math.abs(state.brightness - autoBrightness) > 0.03) {
+            if (Math.abs(state.brightness - autoBrightness) > 0.005) {
               state.brightness = autoBrightness;
               if (brightnessInput) {
                 brightnessInput.value = Math.round(autoBrightness * 100);
@@ -2003,7 +2017,7 @@
       // As environment brightens, smoothly reduce intensity first if on
       if (state.on && wasTurnedOnByFace && !userCustomizedBrightness) {
         if (state.brightness > 0.35) {
-          state.brightness = Math.max(0.35, state.brightness - 0.04);
+          state.brightness = Math.max(0.35, state.brightness - 0.02);
           if (brightnessInput) {
             brightnessInput.value = Math.round(state.brightness * 100);
           }
