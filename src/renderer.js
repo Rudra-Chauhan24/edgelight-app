@@ -2357,6 +2357,23 @@
       if (openPlansFromLicenseBtn && !sub.expired) {
         openPlansFromLicenseBtn.textContent = `✓ ${licenseState.planName || 'Pass'} (${sub.daysRemaining}d left) — Renew / Extend`;
       }
+    } else if (licenseState.status === 'approved') {
+      stopCountdown();
+      const sub = formatSubscriptionRemaining(licenseState);
+      if (licenseBadge) {
+        licenseBadge.className = 'license-badge licensed';
+        licenseBadge.textContent = sub.badgeText;
+        licenseBadge.title = sub.badgeTitle;
+      }
+      if (modalStatusBadge) {
+        modalStatusBadge.className = 'license-status-badge approved';
+        modalStatusBadge.textContent = sub.modalText;
+      }
+      if (openPlansFromLicenseBtn) {
+        openPlansFromLicenseBtn.textContent = '✓ Lifetime Pro Active';
+        openPlansFromLicenseBtn.classList.remove('pulse-glow');
+        openPlansFromLicenseBtn.style.opacity = '0.85';
+      }
     } else {
       stopCountdown();
     }
