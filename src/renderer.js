@@ -420,29 +420,6 @@
     ctx.fill(corePath, 'evenodd');
     ctx.restore();
 
-    // ── LAYER C: INWARD SOFT RADIANT DIFFUSION (toward user's face) ───
-    // Softly projects radiant light inward past the inner bezel boundary,
-    // illuminating the user's face naturally during video calls with smooth falloff.
-    {
-      const inwardDepth = Math.max(8, Math.round(animThick * 0.40));
-      const inRadiantX  = innerX + inwardDepth;
-      const inRadiantY  = innerY + inwardDepth;
-      const inRadiantW  = innerW - inwardDepth * 2;
-      const inRadiantH  = innerH - inwardDepth * 2;
-      const inRadiantR  = Math.max(2, innerR - inwardDepth);
-
-      if (inRadiantW > 0 && inRadiantH > 0) {
-        const inwardPath = new Path2D();
-        squirclePath(inwardPath, innerX, innerY, innerW, innerH, innerR);
-        squirclePath(inwardPath, inRadiantX, inRadiantY, inRadiantW, inRadiantH, inRadiantR);
-        ctx.save();
-        ctx.filter = `blur(${Math.max(4, Math.round(inwardDepth * 0.50))}px)`;
-        ctx.fillStyle = `rgba(${r},${g},${b},${masterOpacity * 0.75})`;
-        ctx.fill(inwardPath, 'evenodd');
-        ctx.filter = 'none';
-        ctx.restore();
-      }
-    }
 
     // ── LAYER D: HIGH-LUMINANCE WHITE CENTER CORE ─────────────────────
     // Continuous studio luminous white core that melts seamlessly into the
