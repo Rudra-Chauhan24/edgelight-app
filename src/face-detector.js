@@ -328,11 +328,15 @@ class FacePresenceDetector {
         ? Math.round(0.70 * faceLuminance + 0.30 * ambientLuminance)
         : Math.round(avgTotalLum);
 
+      const brightnessPercent = Math.max(0, Math.min(100, Math.round((effectiveLuminance / 255) * 100)));
+
       const lighting = {
         faceLuminance,
         ambientLuminance,
         effectiveLuminance,
-        isDark: effectiveLuminance < 68
+        brightnessPercent,
+        isDark: effectiveLuminance < 68,
+        faceDetected: detected
       };
 
       return {
@@ -352,7 +356,9 @@ class FacePresenceDetector {
           faceLuminance: 50,
           ambientLuminance: 50,
           effectiveLuminance: 50,
-          isDark: false
+          brightnessPercent: 20,
+          isDark: false,
+          faceDetected: false
         }
       };
     }
@@ -415,6 +421,22 @@ class FacePresenceDetector {
         confidence
       });
     }
+  }
+
+  getLighting() {
+    return this.latestLighting || {
+      faceLuminance: 50,
+      ambientLuminance: 50,
+      effectiveLuminance: 50,
+      brightnessPercent: 20,
+      isDark: false,
+      faceDetected: false
+    };
+  }
+
+  getBrightnessPercent() {
+    const l = this.getLighting();
+    return l.brightnessPercent !== undefined ? l.brightnessPercent : Math.round((l.effectiveLuminance / 255) * 100);
   }
 
   // Local-only privacy guarantee: zero biometric templates or network transmissions

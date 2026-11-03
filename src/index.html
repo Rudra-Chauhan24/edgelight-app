@@ -54,6 +54,64 @@
   <!-- Ambient status feedback near screen top -->
   <div id="status" role="status" aria-live="polite"></div>
 
+  <!-- Live Camera Brightness & Light Preview Popup -->
+  <div id="cameraBrightnessPopup" class="camera-brightness-popup hidden" role="region" aria-label="Camera Brightness and Live Preview" tabindex="-1">
+    <div class="cbp-card">
+      <div class="cbp-header">
+        <div class="cbp-title-wrap">
+          <span class="cbp-pulse-dot" id="cbpPulseDot"></span>
+          <span class="cbp-title">Live Sensor & Preview</span>
+        </div>
+        <button type="button" class="cbp-close-btn" id="cbpCloseBtn" title="Dismiss preview" aria-label="Dismiss preview">✕</button>
+      </div>
+
+      <!-- Live miniature monitor preview with glowing edge light overlay -->
+      <div class="cbp-preview-screen" id="cbpPreviewScreen">
+        <div class="cbp-monitor-inner" id="cbpMonitorInner">
+          <video id="cbpMiniVideo" class="cbp-mini-video" autoplay playsinline muted></video>
+          <div class="cbp-placeholder-cam" id="cbpPlaceholderCam">
+            <span class="cbp-placeholder-icon">👤</span>
+            <span class="cbp-placeholder-text">Camera Active</span>
+          </div>
+          <!-- Live glowing ring border mirroring current Edge Light output -->
+          <div class="cbp-glow-ring" id="cbpGlowRing"></div>
+        </div>
+        <div class="cbp-preview-badge" id="cbpPreviewBadge">Light OFF</div>
+      </div>
+
+      <!-- Metrics & Status Grid -->
+      <div class="cbp-grid">
+        <div class="cbp-row">
+          <span class="cbp-label">Camera</span>
+          <span class="cbp-val" id="cbpCameraStatus"><span class="cbp-dot active"></span>Active</span>
+        </div>
+        <div class="cbp-row">
+          <span class="cbp-label">Face</span>
+          <span class="cbp-val" id="cbpFaceStatus">Detecting…</span>
+        </div>
+        <div class="cbp-row">
+          <span class="cbp-label">Brightness</span>
+          <div class="cbp-bar-wrap">
+            <div class="cbp-meter-bar"><div class="cbp-meter-fill" id="cbpBrightnessFill" style="width: 50%;"></div></div>
+            <span class="cbp-val-highlight" id="cbpBrightnessVal">50%</span>
+          </div>
+        </div>
+        <div class="cbp-row">
+          <span class="cbp-label">Lighting</span>
+          <span class="cbp-val" id="cbpLightingStatus">Balanced</span>
+        </div>
+        <div class="cbp-row">
+          <span class="cbp-label">Edge Light</span>
+          <span class="cbp-val" id="cbpLightState">OFF</span>
+        </div>
+        <div class="cbp-row">
+          <span class="cbp-label">Intensity</span>
+          <span class="cbp-val" id="cbpIntensityVal">100%</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Top invisible zone to catch hovering when dock is hidden -->
   <div id="hover-zone"></div>
 

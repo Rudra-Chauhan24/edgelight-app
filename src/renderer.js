@@ -756,6 +756,9 @@
     if (window.edgeLightAPI?.notifyLightState) {
       window.edgeLightAPI.notifyLightState(value);
     }
+    if (typeof updateCameraBrightnessPopup === 'function') {
+      updateCameraBrightnessPopup(faceDetector?.getLighting?.(), faceDetector?.isFacePresent?.(), state);
+    }
   }
 
   power.addEventListener('click', (e) => {
@@ -1723,14 +1726,22 @@
         startFaceDetectionCamera();
       }
 
+      popupManuallyDismissed = false;
+      showCameraBrightnessPopup();
+
       if (!manualTurnedOffWhileWebcamActive) {
-        if (!state.on) {
+        const threshold = state.autoThreshold || 70;
+        const currentLux = smoothFaceLuminance ?? 50;
+        // In a bright room, unnecessary illumination is avoided. If dark, turn on immediately.
+        if (currentLux < (threshold - HYSTERESIS) && !state.on) {
           wasTurnedOnByWebcam = true;
           wasTurnedOnByFace = true;
           setOn(true);
           const appLabel = activeApps && activeApps[0] ? ` (${cleanAppName(activeApps[0])})` : '';
-          showStatus(`📷 Camera active${appLabel} — Edge Light on ✨`, 2600);
-          checkAmbientLightSafe();
+          showStatus(`📷 Low light detected${appLabel} — Edge Light on ✨`, 2600);
+        } else {
+          // Update popup with current active camera & measured light status
+          updateCameraBrightnessPopup(faceDetector?.getLighting?.(), faceDetector?.isFacePresent?.(), state);
         }
       }
     } else {
@@ -1747,6 +1758,7 @@
         webcamDebounceTimer = null;
         if (!currentWebcamInUse) {
           stopFaceDetectionCamera(false);
+          hideCameraBrightnessPopup();
           if ((wasTurnedOnByWebcam || wasTurnedOnByFace) && state.on) {
             wasTurnedOnByWebcam = false;
             wasTurnedOnByFace = false;
@@ -1818,6 +1830,189 @@
       toggleAuto();
     }
   });
+
+
+  // ── Live Camera Brightness & Light Preview Popup Elements ───────
+  const cameraBrightnessPopup = document.getElementById('cameraBrightnessPopup');
+  const cbpPulseDot = document.getElementById('cbpPulseDot');
+  const cbpCloseBtn = document.getElementById('cbpCloseBtn');
+  const cbpMiniVideo = document.getElementById('cbpMiniVideo');
+  const cbpPlaceholderCam = document.getElementById('cbpPlaceholderCam');
+  const cbpGlowRing = document.getElementById('cbpGlowRing');
+  const cbpPreviewBadge = document.getElementById('cbpPreviewBadge');
+  const cbpCameraStatus = document.getElementById('cbpCameraStatus');
+  const cbpFaceStatus = document.getElementById('cbpFaceStatus');
+  const cbpBrightnessFill = document.getElementById('cbpBrightnessFill');
+  const cbpBrightnessVal = document.getElementById('cbpBrightnessVal');
+  const cbpLightingStatus = document.getElementById('cbpLightingStatus');
+  const cbpLightState = document.getElementById('cbpLightState');
+  const cbpIntensityVal = document.getElementById('cbpIntensityVal');
+  let popupManuallyDismissed = false;
+
+  function showCameraBrightnessPopup() {
+    if (!cameraBrightnessPopup || popupManuallyDismissed) return;
+    cameraBrightnessPopup.classList.remove('hidden');
+    requestAnimationFrame(() => {
+      cameraBrightnessPopup?.classList.add('visible');
+    });
+  }
+
+  function hideCameraBrightnessPopup(userDismissed = false) {
+    if (!cameraBrightnessPopup) return;
+    if (userDismissed) popupManuallyDismissed = true;
+    cameraBrightnessPopup.classList.remove('visible');
+    setTimeout(() => {
+      if (!cameraBrightnessPopup?.classList.contains('visible')) {
+        cameraBrightnessPopup?.classList.add('hidden');
+      }
+    }, 300);
+  }
+
+  cbpCloseBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    hideCameraBrightnessPopup(true);
+  });
+
+  const cbpInteractiveCard = cameraBrightnessPopup?.querySelector('.cbp-card') || cameraBrightnessPopup;
+  cbpInteractiveCard?.addEventListener('mouseenter', () => setClickThrough(false));
+  cbpInteractiveCard?.addEventListener('mouseleave', () => {
+    if (!isInteractingWithDock && !isPointerDown && !isAnyModalOpen()) {
+      setClickThrough(true);
+    }
+  });
+
+  function updateCameraBrightnessPopup(sample, isFacePresent, currentState) {
+    if (!cameraBrightnessPopup) return;
+    const currState = currentState || state;
+    const lighting = sample?.lighting || faceDetector?.getLighting?.();
+    const isCameraActive = Boolean(
+      (faceStream && faceStream.active && faceDetectionLoopActive) ||
+      (sample && sample._simulatedActive) ||
+      (sample && sample.cameraActive)
+    );
+    const intensityPct = Math.round((currState.brightness || 1.0) * 100);
+    const isOn = Boolean(currState.on);
+
+    // 1. Camera Status: Active, Unavailable, or Waiting for frames
+    if (cbpCameraStatus) {
+      if (isCameraActive) {
+        cbpCameraStatus.innerHTML = '<span class="cbp-dot active"></span>Active';
+      } else if (currentWebcamInUse) {
+        cbpCameraStatus.innerHTML = '<span class="cbp-dot warning"></span>Waiting for frames';
+      } else {
+        cbpCameraStatus.innerHTML = '<span class="cbp-dot"></span>Unavailable';
+      }
+    }
+    if (cbpPulseDot) {
+      cbpPulseDot.className = 'cbp-pulse-dot' + (isCameraActive ? '' : (currentWebcamInUse ? ' warning' : ' idle'));
+    }
+
+    // 2. Face Detection: Face detected or No face detected
+    const faceDetected = Boolean(isFacePresent || lighting?.faceDetected);
+    if (cbpFaceStatus) {
+      if (!isCameraActive) {
+        cbpFaceStatus.textContent = 'No camera';
+        cbpFaceStatus.style.color = '#94a3b8';
+      } else if (faceDetected) {
+        cbpFaceStatus.textContent = 'Face detected';
+        cbpFaceStatus.style.color = '#34d399';
+      } else {
+        cbpFaceStatus.textContent = 'No face detected';
+        cbpFaceStatus.style.color = '#cbd5e1';
+      }
+    }
+
+    // 3. Current Brightness percentage & lux calculated from real camera frames
+    const lum = lighting ? lighting.effectiveLuminance : (smoothFaceLuminance !== null ? Math.round(smoothFaceLuminance) : 50);
+    const brightnessPct = (lighting && lighting.brightnessPercent !== undefined)
+      ? lighting.brightnessPercent
+      : Math.max(0, Math.min(100, Math.round((lum / 255) * 100)));
+
+    if (cbpBrightnessFill) {
+      cbpBrightnessFill.style.width = `${brightnessPct}%`;
+    }
+    if (cbpBrightnessVal) {
+      cbpBrightnessVal.textContent = `${brightnessPct}%`;
+      cbpBrightnessVal.title = `Frame luminance: ${lum} / 255`;
+    }
+
+    // 4. Lighting Status: Bright enough, Low light, or Dark
+    const threshold = currState.autoThreshold || 70;
+    const isDark = lum < (threshold - HYSTERESIS);
+    const isBright = lum > (threshold + HYSTERESIS);
+
+    if (cbpLightingStatus) {
+      if (!isCameraActive) {
+        cbpLightingStatus.textContent = 'Standby';
+        cbpLightingStatus.style.color = '#94a3b8';
+      } else if (isDark) {
+        cbpLightingStatus.textContent = 'Dark';
+        cbpLightingStatus.style.color = '#f59e0b';
+      } else if (isBright) {
+        cbpLightingStatus.textContent = 'Bright enough';
+        cbpLightingStatus.style.color = '#34d399';
+      } else {
+        cbpLightingStatus.textContent = 'Low light';
+        cbpLightingStatus.style.color = '#fbbf24';
+      }
+    }
+
+    // 5. Edge Light Status: ON or OFF
+    if (cbpLightState) {
+      if (isOn) {
+        cbpLightState.innerHTML = '<span class="cbp-dot active"></span>ON';
+        cbpLightState.style.color = '#34d399';
+      } else {
+        cbpLightState.innerHTML = '<span class="cbp-dot"></span>OFF';
+        cbpLightState.style.color = '#94a3b8';
+      }
+    }
+
+    // 6. Light Intensity percentage
+    if (cbpIntensityVal) {
+      cbpIntensityVal.textContent = `${intensityPct}%`;
+    }
+
+    // 7. Live Preview glow ring and badge accurately representing output
+    if (cbpGlowRing) {
+      if (isOn) {
+        const glowColor = currState.color || (typeof kelvinToRGB === 'function' ? kelvinToRGB(currState.warmth || 4500) : '#ffb870');
+        cbpGlowRing.style.setProperty('--cbp-glow-color', glowColor);
+        cbpGlowRing.style.setProperty('--cbp-glow-opacity', String(Math.max(0.3, currState.brightness || 1.0)));
+        cbpGlowRing.classList.add('active');
+      } else {
+        cbpGlowRing.classList.remove('active');
+      }
+    }
+    if (cbpPreviewBadge) {
+      if (isOn) {
+        cbpPreviewBadge.textContent = `Light ON (${intensityPct}%)`;
+        cbpPreviewBadge.classList.add('active');
+      } else {
+        cbpPreviewBadge.textContent = 'Light OFF';
+        cbpPreviewBadge.classList.remove('active');
+      }
+    }
+  }
+
+  window.__updateCameraBrightnessPopup = (sample, isPresent, s) => {
+    updateCameraBrightnessPopup(sample, isPresent, s || state);
+  };
+  window.__getCameraBrightnessPopupState = () => {
+    return {
+      visible: cameraBrightnessPopup?.classList.contains('visible') || false,
+      cameraStatus: cbpCameraStatus?.textContent?.trim() || '',
+      faceStatus: cbpFaceStatus?.textContent?.trim() || '',
+      brightnessVal: cbpBrightnessVal?.textContent?.trim() || '',
+      lightingStatus: cbpLightingStatus?.textContent?.trim() || '',
+      lightState: cbpLightState?.textContent?.trim() || '',
+      intensityVal: cbpIntensityVal?.textContent?.trim() || '',
+      previewBadge: cbpPreviewBadge?.textContent?.trim() || '',
+      isGlowRingActive: cbpGlowRing?.classList.contains('active') || false
+    };
+  };
+  window.__showCameraBrightnessPopup = showCameraBrightnessPopup;
+  window.__hideCameraBrightnessPopup = hideCameraBrightnessPopup;
 
   // ── Face Presence & Smart Ambient Lighting Architecture ─────────
   function handleFaceLightingUpdate(sample) {
@@ -1938,6 +2133,9 @@
       darkConfirmationFrames = 0;
       brightConfirmationFrames = 0;
     }
+
+    // Real-time update to the live camera brightness & lighting effect preview popup
+    updateCameraBrightnessPopup(sample, isFacePresent, state);
   }
   window.__handleFaceLightingUpdate = handleFaceLightingUpdate;
 
@@ -2045,6 +2243,16 @@
       faceVideoEl.srcObject = faceStream;
       await faceVideoEl.play().catch(() => {});
 
+      if (cbpMiniVideo) {
+        try {
+          cbpMiniVideo.srcObject = faceStream;
+          cbpMiniVideo.classList.add('active');
+          if (cbpPlaceholderCam) cbpPlaceholderCam.style.display = 'none';
+          cbpMiniVideo.play().catch(() => {});
+        } catch (_) {}
+      }
+      showCameraBrightnessPopup();
+
       faceConsecutiveErrors = 0;
       faceDetectionLoopActive = true;
       runFaceProcessingLoop();
@@ -2116,6 +2324,14 @@
       } catch (_) {}
       faceVideoEl = null;
     }
+    if (cbpMiniVideo) {
+      try {
+        cbpMiniVideo.srcObject = null;
+        cbpMiniVideo.classList.remove('active');
+        if (cbpPlaceholderCam) cbpPlaceholderCam.style.display = 'flex';
+      } catch (_) {}
+    }
+    updateCameraBrightnessPopup(faceDetector?.getLighting?.(), false, state);
     if (faceDetector) {
       faceDetector.reset();
     }
