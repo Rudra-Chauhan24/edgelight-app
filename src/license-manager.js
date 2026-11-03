@@ -832,7 +832,8 @@ class LicenseManager {
     this._hasInitialized = true;
 
     // Determine current license state
-    return this._evaluate(data);
+    this.currentStatus = this._evaluate(data);
+    return this.currentStatus;
   }
 
   // Daily randomized verification check with Firestore
@@ -1714,10 +1715,14 @@ class LicenseManager {
     return new Promise((resolve) => {
       try {
         const u = new URL('/api/admin/grant-lifetime', backendUrl);
+        const nonce = crypto.randomBytes(16).toString('hex');
+        const timestamp = Date.now();
         const payload = JSON.stringify({
           hwid: shortHwid,
           adminToken: cleanToken,
-          adminIdentity: adminIdentity || undefined
+          adminIdentity: adminIdentity || undefined,
+          nonce,
+          timestamp
         });
         const isHttps = u.protocol === 'https:';
         const client = isHttps ? https : require('http');
@@ -1748,6 +1753,8 @@ class LicenseManager {
                   data.planId = 'lifetime';
                   data.planName = lic.planName || 'Lifetime Pro (Admin)';
                   data.licenseKey = lic.licenseKey;
+                  data.licenseSignature = lic.licenseSignature || null;
+                  data.adminSessionToken = parsed.sessionToken || null;
                   data.expiresAt = null;
                   data.isAdminGranted = true;
                   data.adminGrantedAt = new Date().toISOString();
@@ -1756,6 +1763,7 @@ class LicenseManager {
                   this.vault.write(data);
 
                   const evaluated = this._evaluate(data);
+                  this.currentStatus = evaluated;
                   resolve({
                     success: true,
                     status: 'approved',
@@ -1776,39 +1784,9 @@ class LicenseManager {
 
         req.on('timeout', () => {
           req.destroy();
-          if (cleanToken === 'edgelight_admin_sec_997f8c2e4b1a5d09f7a8b6c3e2d140f7') {
-            let data = this.vault.read() || {};
-            data.status = 'approved';
-            data.planId = 'lifetime';
-            data.planName = 'Lifetime Pro (Admin)';
-            data.licenseKey = 'ADMIN-LIFE-' + crypto.randomBytes(8).toString('hex').toUpperCase();
-            data.expiresAt = null;
-            data.isAdminGranted = true;
-            data.adminGrantedAt = new Date().toISOString();
-            data.approvedAt = new Date().toISOString();
-            data.clockTampered = false;
-            this.vault.write(data);
-            const evaluated = this._evaluate(data);
-            return resolve({ success: true, status: 'approved', licenseInfo: evaluated });
-          }
           resolve({ success: false, error: 'Backend server timed out. Check your connection.' });
         });
         req.on('error', (err) => {
-          if (cleanToken === 'edgelight_admin_sec_997f8c2e4b1a5d09f7a8b6c3e2d140f7') {
-            let data = this.vault.read() || {};
-            data.status = 'approved';
-            data.planId = 'lifetime';
-            data.planName = 'Lifetime Pro (Admin)';
-            data.licenseKey = 'ADMIN-LIFE-' + crypto.randomBytes(8).toString('hex').toUpperCase();
-            data.expiresAt = null;
-            data.isAdminGranted = true;
-            data.adminGrantedAt = new Date().toISOString();
-            data.approvedAt = new Date().toISOString();
-            data.clockTampered = false;
-            this.vault.write(data);
-            const evaluated = this._evaluate(data);
-            return resolve({ success: true, status: 'approved', licenseInfo: evaluated });
-          }
           const isConnRefused = err.code === 'ECONNREFUSED' || (err.message && err.message.includes('ECONNREFUSED'));
           const errorMsg = isConnRefused
             ? `Connection failed: Backend server is unreachable at ${backendUrl}. Please ensure the backend server is running.`
