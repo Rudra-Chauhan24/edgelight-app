@@ -1247,6 +1247,42 @@ function checkWebcamUsage() {
   });
 }
 
+function enrichMeetingContext(activeApps, callback) {
+  if (!activeApps || activeApps.length === 0) return callback(activeApps);
+
+  const browserExes = ['chrome.exe', 'msedge.exe', 'firefox.exe', 'brave.exe', 'opera.exe'];
+  const hasBrowser = activeApps.some(app => {
+    const l = app.toLowerCase();
+    return browserExes.some(b => l.includes(b));
+  });
+
+  if (!hasBrowser) {
+    return callback(activeApps);
+  }
+
+  const browser = activeApps.find(app => browserExes.some(b => app.toLowerCase().includes(b)));
+  const match = browser ? browser.match(/([a-zA-Z0-9_\-]+\.exe)/i) : null;
+  const exeName = match ? match[1] : 'chrome.exe';
+
+  execFile('tasklist.exe', ['/v', '/fi', `imagename eq ${exeName}`, '/fo', 'csv'], { windowsHide: true, timeout: 1200 }, (err, stdout) => {
+    if (!err && stdout) {
+      if (/Meet\s*[-–—]|Google Meet/i.test(stdout)) {
+        if (!activeApps.some(a => /google meet/i.test(a))) {
+          activeApps.unshift('Google Meet');
+        }
+      } else if (/Microsoft Teams|Teams\s*[-–—]/i.test(stdout)) {
+        if (!activeApps.some(a => /teams/i.test(a))) {
+          activeApps.unshift('Microsoft Teams');
+        }
+      } else if (/Zoom Meeting/i.test(stdout)) {
+        if (!activeApps.some(a => /zoom/i.test(a))) {
+          activeApps.unshift('Zoom');
+        }
+      }
+    }
+    callback(activeApps);
+  });
+}
 function processWebcamRegistry(stdout) {
   let inUse = false;
   const activeApps = [];
@@ -1304,16 +1340,23 @@ function processWebcamRegistry(stdout) {
     }
   }
 
-  const stateChanged = (inUse !== lastWebcamInUse);
+  const appsChanged = JSON.stringify(activeApps) !== JSON.stringify(lastActiveApps);
+  const stateChanged = (inUse !== lastWebcamInUse) || (inUse && appsChanged);
   lastWebcamInUse = inUse;
   lastActiveApps = activeApps;
 
   if (stateChanged) {
     if (inUse) {
       ensureTopmost(true);
-    }
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('webcam-access-changed', inUse, activeApps);
+      enrichMeetingContext(activeApps, (enrichedApps) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('webcam-access-changed', inUse, enrichedApps);
+        }
+      });
+    } else {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('webcam-access-changed', false, []);
+      }
     }
   }
 }

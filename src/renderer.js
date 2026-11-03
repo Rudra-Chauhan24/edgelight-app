@@ -83,7 +83,7 @@
   let currentWebcamInUse = false;
 
   // ── Automatic Human Face Presence Detection State ──────────────────
-  let autoFaceEnabled = false;
+  let autoFaceEnabled = true;
   let wasTurnedOnByFace = false;
   let manualTurnedOffWhileFaceActive = false;
   let userCustomizedBrightness = false;
@@ -874,9 +874,17 @@
     }
   });
 
-  // Status feedback toast
+  // Status feedback toast with deduplication to prevent repetitive popups
   let statusHideTimer = null;
+  let lastStatusMsg = '';
+  let lastStatusTime = 0;
   function showStatus(msg, autoHideMs = 0) {
+    const now = Date.now();
+    if (msg === lastStatusMsg && (now - lastStatusTime < 3500)) {
+      return;
+    }
+    lastStatusMsg = msg;
+    lastStatusTime = now;
     status.textContent = msg;
     status.classList.add('visible');
     if (statusHideTimer) clearTimeout(statusHideTimer);
@@ -1618,15 +1626,19 @@
     let clean = name.replace(/^.*[#\\]/, '');
     clean = clean.replace(/\.exe$/i, '');
     const lower = clean.toLowerCase();
-    if (lower.includes('chrome')) return 'Chrome';
+    if (lower.includes('google meet') || lower.includes('google-meet')) return 'Google Meet';
+    if (lower.includes('meet') && !lower.includes('meeting')) return 'Google Meet';
+    if (lower.includes('whatsapp')) return 'WhatsApp';
+    if (lower.includes('zoom')) return 'Zoom';
+    if (lower.includes('teams') || lower.includes('msteams')) return 'Teams';
+    if (lower.includes('chrome')) return 'Google Meet / Chrome';
     if (lower.includes('msedge') || lower === 'edge') return 'Edge';
     if (lower.includes('firefox')) return 'Firefox';
     if (lower.includes('windowscamera')) return 'Camera';
-    if (lower.includes('whatsapp')) return 'WhatsApp';
-    if (lower.includes('zoom')) return 'Zoom';
-    if (lower.includes('teams')) return 'Teams';
     if (lower.includes('discord')) return 'Discord';
     if (lower.includes('skype')) return 'Skype';
+    if (lower.includes('webex')) return 'Webex';
+    if (lower.includes('slack')) return 'Slack';
     if (lower.includes('obs')) return 'OBS';
     return clean;
   }
@@ -1706,9 +1718,15 @@
         webcamDebounceTimer = null;
       }
 
+      // Automatically start face & ambient brightness sensor when camera is active
+      if (autoFaceEnabled && faceDetector) {
+        startFaceDetectionCamera();
+      }
+
       if (!manualTurnedOffWhileWebcamActive) {
         if (!state.on) {
           wasTurnedOnByWebcam = true;
+          wasTurnedOnByFace = true;
           setOn(true);
           const appLabel = activeApps && activeApps[0] ? ` (${cleanAppName(activeApps[0])})` : '';
           showStatus(`📷 Camera active${appLabel} — Edge Light on ✨`, 2600);
@@ -1717,6 +1735,7 @@
       }
     } else {
       manualTurnedOffWhileWebcamActive = false;
+      manualTurnedOffWhileFaceActive = false;
 
       // Debounce turning OFF by 2500ms to eliminate flickering or rapid ON/OFF cycles
       // when switching apps, transitioning rooms, or camera frame delays
@@ -1726,10 +1745,14 @@
 
       webcamDebounceTimer = setTimeout(() => {
         webcamDebounceTimer = null;
-        if (!currentWebcamInUse && wasTurnedOnByWebcam && state.on) {
-          wasTurnedOnByWebcam = false;
-          setOn(false);
-          showStatus('📷 Camera released — Edge Light off', 2200);
+        if (!currentWebcamInUse) {
+          stopFaceDetectionCamera(false);
+          if ((wasTurnedOnByWebcam || wasTurnedOnByFace) && state.on) {
+            wasTurnedOnByWebcam = false;
+            wasTurnedOnByFace = false;
+            setOn(false);
+            showStatus('📷 Camera released — Edge Light off', 2200);
+          }
         }
       }, 2500);
     }
@@ -1747,6 +1770,13 @@
     window.edgeLightAPI.getWebcamStatus().then((status) => {
       if (status && status.inUse) {
         handleWebcamAccessChange(true, status.activeApps || []);
+      } else {
+        // By default on launch, keep overlay off until a video call or camera usage is detected
+        if (autoWebcamEnabled && state.on && !manualTurnedOffWhileWebcamActive) {
+          wasTurnedOnByWebcam = false;
+          wasTurnedOnByFace = false;
+          setOn(false);
+        }
       }
     }).catch(() => {});
   }
@@ -1916,7 +1946,7 @@
       consecutiveRequired: 3,
       gracePeriodMs: 3000,
       sampleIntervalMs: 140,
-      enabled: false
+      enabled: true
     });
 
     faceDetector.onFaceStateChange = (isPresent, info) => {
