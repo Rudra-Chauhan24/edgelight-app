@@ -79,6 +79,22 @@ async function ensureLocalBackendService() {
         detached: true,
         stdio: 'ignore'
       });
+      localBackendProcess.on('error', (err) => {
+        console.warn('[Backend] Node spawn error, attempting fork fallback:', err.message);
+        try {
+          localBackendProcess = fork(backendServerPath, [], {
+            cwd: backendDir,
+            env: spawnEnv,
+            stdio: 'ignore'
+          });
+          localBackendProcess.on('error', (fe) => {
+            console.warn('[Backend] Fork error:', fe.message);
+          });
+          localBackendProcess.unref();
+        } catch (fe) {
+          console.warn('[Backend] Fork fallback failed:', fe.message);
+        }
+      });
       localBackendProcess.unref();
     } catch (_) {
       localBackendProcess = fork(backendServerPath, [], {
@@ -1287,6 +1303,7 @@ function processWebcamRegistry(stdout) {
   let inUse = false;
   const activeApps = [];
 
+  try {
   if (stdout) {
     const sections = stdout.split(/(?=HKEY_)/i);
     const filetimeNow = (BigInt(Date.now()) + 11644473600000n) * 10000n;
@@ -1358,6 +1375,9 @@ function processWebcamRegistry(stdout) {
         mainWindow.webContents.send('webcam-access-changed', false, []);
       }
     }
+  }
+  } catch (err) {
+    console.warn('[WebcamMonitor] Registry processing error:', err.message);
   }
 }
 
