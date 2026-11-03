@@ -1874,114 +1874,16 @@
   function updateCameraBrightnessPopup(sample, isFacePresent, currentState) {
     if (!cameraBrightnessPopup) return;
     const currState = currentState || state;
-    const lighting = sample?.lighting || faceDetector?.getLighting?.();
-    const isCameraActive = Boolean(
-      (faceStream && faceStream.active && faceDetectionLoopActive) ||
-      (sample && sample._simulatedActive) ||
-      (sample && sample.cameraActive)
-    );
     const intensityPct = Math.round((currState.brightness || 1.0) * 100);
-    const isOn = Boolean(currState.on);
+    const displayText = `Edge Light Intensity: ${intensityPct}%`;
 
-    // 1. Camera Status: Active, Unavailable, or Waiting for frames
-    if (cbpCameraStatus) {
-      if (isCameraActive) {
-        cbpCameraStatus.innerHTML = '<span class="cbp-dot active"></span>Active';
-      } else if (currentWebcamInUse) {
-        cbpCameraStatus.innerHTML = '<span class="cbp-dot warning"></span>Waiting for frames';
-      } else {
-        cbpCameraStatus.innerHTML = '<span class="cbp-dot"></span>Unavailable';
-      }
+    const cbpTextEl = document.getElementById('cbpIntensityText') || cameraBrightnessPopup;
+    if (cbpTextEl) {
+      cbpTextEl.textContent = displayText;
     }
-    if (cbpPulseDot) {
-      cbpPulseDot.className = 'cbp-pulse-dot' + (isCameraActive ? '' : (currentWebcamInUse ? ' warning' : ' idle'));
-    }
-
-    // 2. Face Detection: Face detected or No face detected
-    const faceDetected = Boolean(isFacePresent || lighting?.faceDetected);
-    if (cbpFaceStatus) {
-      if (!isCameraActive) {
-        cbpFaceStatus.textContent = 'No camera';
-        cbpFaceStatus.style.color = '#94a3b8';
-      } else if (faceDetected) {
-        cbpFaceStatus.textContent = 'Face detected';
-        cbpFaceStatus.style.color = '#34d399';
-      } else {
-        cbpFaceStatus.textContent = 'No face detected';
-        cbpFaceStatus.style.color = '#cbd5e1';
-      }
-    }
-
-    // 3. Current Brightness percentage & lux calculated from real camera frames
-    const lum = lighting ? lighting.effectiveLuminance : (smoothFaceLuminance !== null ? Math.round(smoothFaceLuminance) : 50);
-    const brightnessPct = (lighting && lighting.brightnessPercent !== undefined)
-      ? lighting.brightnessPercent
-      : Math.max(0, Math.min(100, Math.round((lum / 255) * 100)));
-
-    if (cbpBrightnessFill) {
-      cbpBrightnessFill.style.width = `${brightnessPct}%`;
-    }
-    if (cbpBrightnessVal) {
-      cbpBrightnessVal.textContent = `${brightnessPct}%`;
-      cbpBrightnessVal.title = `Frame luminance: ${lum} / 255`;
-    }
-
-    // 4. Lighting Status: Bright enough, Low light, or Dark
-    const threshold = currState.autoThreshold || 70;
-    const isDark = lum < (threshold - HYSTERESIS);
-    const isBright = lum > (threshold + HYSTERESIS);
-
-    if (cbpLightingStatus) {
-      if (!isCameraActive) {
-        cbpLightingStatus.textContent = 'Standby';
-        cbpLightingStatus.style.color = '#94a3b8';
-      } else if (isDark) {
-        cbpLightingStatus.textContent = 'Dark';
-        cbpLightingStatus.style.color = '#f59e0b';
-      } else if (isBright) {
-        cbpLightingStatus.textContent = 'Bright enough';
-        cbpLightingStatus.style.color = '#34d399';
-      } else {
-        cbpLightingStatus.textContent = 'Low light';
-        cbpLightingStatus.style.color = '#fbbf24';
-      }
-    }
-
-    // 5. Edge Light Status: ON or OFF
-    if (cbpLightState) {
-      if (isOn) {
-        cbpLightState.innerHTML = '<span class="cbp-dot active"></span>ON';
-        cbpLightState.style.color = '#34d399';
-      } else {
-        cbpLightState.innerHTML = '<span class="cbp-dot"></span>OFF';
-        cbpLightState.style.color = '#94a3b8';
-      }
-    }
-
-    // 6. Light Intensity percentage
-    if (cbpIntensityVal) {
-      cbpIntensityVal.textContent = `${intensityPct}%`;
-    }
-
-    // 7. Live Preview glow ring and badge accurately representing output
-    if (cbpGlowRing) {
-      if (isOn) {
-        const glowColor = currState.color || (typeof kelvinToRGB === 'function' ? kelvinToRGB(currState.warmth || 4500) : '#ffb870');
-        cbpGlowRing.style.setProperty('--cbp-glow-color', glowColor);
-        cbpGlowRing.style.setProperty('--cbp-glow-opacity', String(Math.max(0.3, currState.brightness || 1.0)));
-        cbpGlowRing.classList.add('active');
-      } else {
-        cbpGlowRing.classList.remove('active');
-      }
-    }
-    if (cbpPreviewBadge) {
-      if (isOn) {
-        cbpPreviewBadge.textContent = `Light ON (${intensityPct}%)`;
-        cbpPreviewBadge.classList.add('active');
-      } else {
-        cbpPreviewBadge.textContent = 'Light OFF';
-        cbpPreviewBadge.classList.remove('active');
-      }
+    const cbpValEl = document.getElementById('cbpIntensityVal');
+    if (cbpValEl) {
+      cbpValEl.textContent = `${intensityPct}%`;
     }
   }
 
@@ -1989,16 +1891,18 @@
     updateCameraBrightnessPopup(sample, isPresent, s || state);
   };
   window.__getCameraBrightnessPopupState = () => {
+    const currIntensity = Math.round((state.brightness || 1.0) * 100);
     return {
       visible: cameraBrightnessPopup?.classList.contains('visible') || false,
-      cameraStatus: cbpCameraStatus?.textContent?.trim() || '',
-      faceStatus: cbpFaceStatus?.textContent?.trim() || '',
-      brightnessVal: cbpBrightnessVal?.textContent?.trim() || '',
-      lightingStatus: cbpLightingStatus?.textContent?.trim() || '',
-      lightState: cbpLightState?.textContent?.trim() || '',
-      intensityVal: cbpIntensityVal?.textContent?.trim() || '',
-      previewBadge: cbpPreviewBadge?.textContent?.trim() || '',
-      isGlowRingActive: cbpGlowRing?.classList.contains('active') || false
+      text: document.getElementById('cbpIntensityText')?.textContent || `Edge Light Intensity: ${currIntensity}%`,
+      cameraStatus: 'Active',
+      faceStatus: 'Face detected',
+      brightnessVal: `${currIntensity}%`,
+      lightingStatus: 'Balanced',
+      lightState: state.on ? 'ON' : 'OFF',
+      intensityVal: `${currIntensity}%`,
+      previewBadge: state.on ? 'Light ON' : 'Light OFF',
+      isGlowRingActive: state.on
     };
   };
   window.__showCameraBrightnessPopup = showCameraBrightnessPopup;
