@@ -402,7 +402,7 @@
       const spillH  = outerH + 12;
       const spillR  = outerR + 6;
       squirclePath(spill, spillX, spillY, spillW, spillH, spillR);
-      squirclePath(spill, innerX, innerY, innerW, innerH, innerR);
+      squirclePath(spill, outerX + 8, outerY + 8, outerW - 16, outerH - 16, Math.max(2, outerR - 8));
       ctx.save();
       ctx.filter = 'blur(10px)';
       ctx.fillStyle = `rgba(${r},${g},${b},${masterOpacity * 0.40})`;
@@ -459,6 +459,15 @@
 
       ctx.restore();
     }
+
+    // ── CRISP CLEAN CUTOUT: Mathematically punch out inner screen with zero inner border ──
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-out';
+    const innerCutout = new Path2D();
+    squirclePath(innerCutout, innerX, innerY, innerW, innerH, innerR);
+    ctx.fillStyle = '#000000';
+    ctx.fill(innerCutout);
+    ctx.restore();
 
     // ── macOS Fluid Cursor Hole (Apple Edge Light Recede Cove) ────────
     if (state.avoidMouse && state.on && mouseState.currentProximity > 0.01 && ts > 0.05 && mouseState.currentX > -1000) {
