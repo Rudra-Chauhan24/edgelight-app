@@ -79,6 +79,7 @@
   // ── Automatic Website/App Webcam Detection State (MacBook Style) ──
   let autoWebcamEnabled = true;
   let wasTurnedOnByWebcam = false;
+  let wasTurnedOnByCall = false;
   let manualTurnedOffWhileWebcamActive = false;
   let currentWebcamInUse = false;
 
@@ -788,6 +789,7 @@
       manualTurnedOffWhileFaceActive = false;
     }
     wasTurnedOnByWebcam = false;
+    wasTurnedOnByCall = false;
     wasTurnedOnByFace = false;
     setOn(nextState);
     power.blur();
@@ -1628,6 +1630,24 @@
     } catch (e) {}
   }
 
+    function isSupportedVideoCallApp(name) {
+    if (!name) return false;
+    const lower = String(name).toLowerCase();
+    return (
+      lower.includes('zoom') ||
+      lower.includes('teams') ||
+      lower.includes('msteams') ||
+      lower.includes('google meet') ||
+      lower.includes('meet') ||
+      lower.includes('whatsapp') ||
+      lower.includes('skype') ||
+      lower.includes('webex') ||
+      lower.includes('slack') ||
+      lower.includes('discord')
+    );
+  }
+  window.__isSupportedVideoCallApp = isSupportedVideoCallApp;
+
   function cleanAppName(name) {
     if (!name) return '';
     let clean = name.replace(/^.*[#\\]/, '');
@@ -1635,6 +1655,7 @@
     const lower = clean.toLowerCase();
     if (lower.includes('google meet') || lower.includes('google-meet')) return 'Google Meet';
     if (lower.includes('meet') && !lower.includes('meeting')) return 'Google Meet';
+    if (lower.includes('whatsapp web') || lower.includes('whatsappweb')) return 'WhatsApp Web';
     if (lower.includes('whatsapp')) return 'WhatsApp';
     if (lower.includes('zoom')) return 'Zoom';
     if (lower.includes('teams') || lower.includes('msteams')) return 'Teams';
@@ -1715,7 +1736,7 @@
     }
   }
 
-  function handleWebcamAccessChange(inUse, activeApps) {
+    function handleWebcamAccessChange(inUse, activeApps) {
     currentWebcamInUse = !!inUse;
     if (!autoWebcamEnabled) return;
 
@@ -1734,18 +1755,32 @@
       showCameraBrightnessPopup();
 
       if (!manualTurnedOffWhileWebcamActive) {
-        const threshold = state.autoThreshold || 70;
-        const currentLux = smoothFaceLuminance ?? 50;
-        // In a bright room, unnecessary illumination is avoided. If dark, turn on immediately.
-        if (currentLux < (threshold - HYSTERESIS) && !state.on) {
-          wasTurnedOnByWebcam = true;
-          wasTurnedOnByFace = true;
-          setOn(true);
-          const appLabel = activeApps && activeApps[0] ? ` (${cleanAppName(activeApps[0])})` : '';
-          showStatus(`📷 Low light detected${appLabel} — Edge Light on ✨`, 2600);
+        // 1. Detect active video call in supported applications (Zoom, Teams, Meet, WhatsApp, etc.)
+        const activeCallApp = (activeApps || []).find(app => isSupportedVideoCallApp(app) || isSupportedVideoCallApp(cleanAppName(app)));
+
+        if (activeCallApp) {
+          if (!state.on) {
+            wasTurnedOnByWebcam = true;
+            wasTurnedOnByCall = true;
+            setOn(true);
+            const appLabel = ` (${cleanAppName(activeCallApp)})`;
+            showStatus(`📹 Video call started${appLabel} — Edge Light on ✨`, 2600);
+          }
         } else {
-          // Update popup with current active camera & measured light status
-          updateCameraBrightnessPopup(faceDetector?.getLighting?.(), faceDetector?.isFacePresent?.(), state);
+          // 2. Non-video-call camera access: ambient light threshold check with hysteresis
+          const threshold = state.autoThreshold || 70;
+          const currentLux = smoothFaceLuminance ?? 50;
+          // In a bright room, unnecessary illumination is avoided. If dark, turn on immediately.
+          if (currentLux < (threshold - HYSTERESIS) && !state.on) {
+            wasTurnedOnByWebcam = true;
+            wasTurnedOnByFace = true;
+            setOn(true);
+            const appLabel = activeApps && activeApps[0] ? ` (${cleanAppName(activeApps[0])})` : '';
+            showStatus(`📷 Low light detected${appLabel} — Edge Light on ✨`, 2600);
+          } else {
+            // Update popup with current active camera & measured light status
+            updateCameraBrightnessPopup(faceDetector?.getLighting?.(), faceDetector?.isFacePresent?.(), state);
+          }
         }
       }
     } else {
@@ -1763,11 +1798,12 @@
         if (!currentWebcamInUse) {
           stopFaceDetectionCamera(false);
           hideCameraBrightnessPopup();
-          if ((wasTurnedOnByWebcam || wasTurnedOnByFace) && state.on) {
+          if ((wasTurnedOnByWebcam || wasTurnedOnByCall || wasTurnedOnByFace) && state.on) {
             wasTurnedOnByWebcam = false;
+            wasTurnedOnByCall = false;
             wasTurnedOnByFace = false;
             setOn(false);
-            showStatus('📷 Camera released — Edge Light off', 2200);
+            showStatus('📷 Video call ended — Edge Light off', 2200);
           }
         }
       }, 2500);

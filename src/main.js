@@ -1294,6 +1294,22 @@ function enrichMeetingContext(activeApps, callback) {
         if (!activeApps.some(a => /zoom/i.test(a))) {
           activeApps.unshift('Zoom');
         }
+      } else if (/WhatsApp/i.test(stdout)) {
+        if (!activeApps.some(a => /whatsapp/i.test(a))) {
+          activeApps.unshift('WhatsApp Web');
+        }
+      } else if (/Webex/i.test(stdout)) {
+        if (!activeApps.some(a => /webex/i.test(a))) {
+          activeApps.unshift('Webex');
+        }
+      } else if (/Slack/i.test(stdout)) {
+        if (!activeApps.some(a => /slack/i.test(a))) {
+          activeApps.unshift('Slack');
+        }
+      } else if (/Skype/i.test(stdout)) {
+        if (!activeApps.some(a => /skype/i.test(a))) {
+          activeApps.unshift('Skype');
+        }
       }
     }
     callback(activeApps);
