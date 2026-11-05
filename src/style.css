@@ -3598,7 +3598,7 @@ input[type="range"]:focus-visible,
    Live Camera Brightness & Light Preview Popup
    ===================================================================== */
 /* ── Live Intensity Popup Pill (Styled identically to #status notification) ── */
-.camera-brightness-popup {
+.camera-brightness-popup { display: none !important; opacity: 0 !important; visibility: hidden !important; pointer-events: none !important;
   position: fixed;
   top: 24px;
   left: 50%;
