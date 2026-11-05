@@ -148,8 +148,8 @@
   // ── ANIMATION SYSTEM ── thickScale 0↔1 with smooth ease-in and ease-out curves (3s duration)
   // Turn ON & Turn OFF: cubic-bezier(0.42, 0.0, 0.58, 1.0) ease-in and ease-out transition curve
   // Symmetrical, luxurious ease-in and ease-out transition that gently accelerates and decelerates over 3000ms.
-  const ANIM_ON_MS  = 280;  // Fast, responsive 280ms bloom-in (eliminates ON lag)
-  const ANIM_OFF_MS = 240;  // Clean, instant 240ms bloom-out (eliminates OFF lag)  // 3.0s ease-in and ease-out bloom-out duration
+  const ANIM_ON_MS  = 3000;  // 3.0s ease-in and ease-out bloom-in duration
+  const ANIM_OFF_MS = 3000;  // 3.0s ease-in and ease-out bloom-out duration
   // Ease-in and ease-out transition: cubic-bezier(0.42, 0.0, 0.58, 1.0)
   const easeInOut    = bezierEase(0.42, 0.0, 0.58, 1.0);
   const easeBloomIn  = easeInOut;
@@ -164,57 +164,6 @@
   let lastFrameTime = performance.now();
 
   let dpr = window.devicePixelRatio || 1;
-
-    // ── Persistent Intended Configuration (Preserved across Sleep / Resume / Display switches) ──
-  const intendedLightingConfig = {
-    brightness: 1.0,
-    temp: 0.50,
-    thickness: 96,
-    on: false
-  };
-
-  function captureIntendedLightingConfig() {
-    intendedLightingConfig.brightness = Math.max(0.85, state.brightness || 1.0);
-    intendedLightingConfig.temp = state.temp;
-    intendedLightingConfig.thickness = state.thickness;
-    intendedLightingConfig.on = state.on;
-  }
-
-  function restoreIntendedLightingConfig() {
-    // 1. Reset frame timing to prevent clock jump from sleep duration
-    lastFrameTime = performance.now();
-
-    // 2. Refresh device pixel ratio and re-render canvas backing store
-    dpr = window.devicePixelRatio || 1;
-    try { resize(); } catch (_) {}
-    try { autoAdjustToScreen(false); } catch (_) {}
-
-    // 3. Re-apply full intended brightness — NEVER drop to 46% or dim on wake
-    const targetB = Math.max(0.85, intendedLightingConfig.brightness || 1.0);
-    state.brightness = targetB;
-    renderState.brightness = targetB;
-    state.temp = intendedLightingConfig.temp;
-    renderState.temp = intendedLightingConfig.temp;
-    state.thickness = intendedLightingConfig.thickness;
-    renderState.thickness = intendedLightingConfig.thickness;
-
-    if (brightnessInput) brightnessInput.value = Math.round(targetB * 100);
-    if (brightnessVal) brightnessVal.textContent = `${Math.round(targetB * 100)}%`;
-
-    // 4. If lighting was active before sleep, ensure thickScale is 1.0 and draw immediate frame
-    if (state.on || intendedLightingConfig.on) {
-      state.on = true;
-      thickScaleTarget = 1.0;
-      thickScaleFrom   = 1.0;
-      renderState.thickScale = 1.0;
-      thickScaleTime   = performance.now();
-      drawFrame();
-    } else {
-      clearCanvas();
-    }
-
-    requestRender();
-  }
 
   // Thorough canvas wipe that clears the full hardware buffer irrespective of transforms or filters
   function clearCanvas() {
@@ -309,15 +258,9 @@
 
   if (window.edgeLightAPI?.onDisplayConfigurationChanged) {
     window.edgeLightAPI.onDisplayConfigurationChanged((config) => {
-      dpr = window.devicePixelRatio || 1;
       resize();
       autoAdjustToScreen(false);
       clampBarPosition();
-      if (state.on) {
-        state.brightness = Math.max(0.85, state.brightness || 1.0);
-        renderState.brightness = state.brightness;
-        drawFrame();
-      }
       requestRender();
     });
   }
@@ -849,7 +792,6 @@
     wasTurnedOnByCall = false;
     wasTurnedOnByFace = false;
     setOn(nextState);
-    captureIntendedLightingConfig();
     power.blur();
     showStatus(state.on ? 'Edge Light On ✨' : 'Edge Light Off', 1800);
     if (!state.on && !isInteractingWithDock) {
@@ -2089,12 +2031,17 @@
           if (!userCustomizedBrightness) {
             const darknessRatio = Math.max(0, Math.min(1.0, (threshold - currentLux) / threshold));
             const autoBrightness = Math.min(1.0, Math.max(0.35, 0.35 + darknessRatio * 0.65));
-            // Default appearance is full 100% studio illumination (Screenshot 2 reference)
-            if (!userCustomizedBrightness) {
-              state.brightness = 1.0;
-              renderState.brightness = 1.0;
+
+            if (Math.abs(state.brightness - autoBrightness) > 0.005) {
+              state.brightness = autoBrightness;
+              if (brightnessInput) {
+                brightnessInput.value = Math.round(autoBrightness * 100);
+              }
+              if (brightnessVal) {
+                brightnessVal.textContent = `${Math.round(autoBrightness * 100)}%`;
+              }
+              requestRender();
             }
-            requestRender();
           }
         }
       }
@@ -2103,10 +2050,18 @@
       darkConfirmationFrames = 0;
       brightConfirmationFrames++;
 
-      // Maintain consistent default 100% lighting appearance without gradual dimming loops
-      if (state.on && !userCustomizedBrightness) {
-        state.brightness = 1.0;
-        renderState.brightness = 1.0;
+      // As environment brightens, smoothly reduce intensity first if on
+      if (state.on && wasTurnedOnByFace && !userCustomizedBrightness) {
+        if (state.brightness > 0.35) {
+          state.brightness = Math.max(0.35, state.brightness - 0.02);
+          if (brightnessInput) {
+            brightnessInput.value = Math.round(state.brightness * 100);
+          }
+          if (brightnessVal) {
+            brightnessVal.textContent = `${Math.round(state.brightness * 100)}%`;
+          }
+          requestRender();
+        }
       }
 
       // Require 7 consecutive bright frames (~1000ms confirmation period) to turn off
@@ -2371,23 +2326,20 @@
     toggleAutoFace();
   });
 
-  // Power Monitor sleep and resume listeners with robust state restoration
+  // Power Monitor sleep and resume listeners
   if (window.edgeLightAPI?.onSystemSuspend) {
     window.edgeLightAPI.onSystemSuspend(() => {
-      captureIntendedLightingConfig();
       stopFaceDetectionCamera(false);
     });
   }
   if (window.edgeLightAPI?.onSystemResume) {
     window.edgeLightAPI.onSystemResume(() => {
-      restoreIntendedLightingConfig();
-      // Re-query webcam status safely without overriding brightness
-      if (window.edgeLightAPI?.getWebcamStatus) {
-        window.edgeLightAPI.getWebcamStatus().then(status => {
-          if (status && status.inUse) {
-            handleWebcamAccessChange(true, status.activeApps || []);
-          }
-        }).catch(() => {});
+      try { resize(); } catch (_) {}
+      try { autoAdjustToScreen(false); } catch (_) {}
+      if (autoFaceEnabled) {
+        setTimeout(() => {
+          startFaceDetectionCamera();
+        }, 1200);
       }
     });
   }

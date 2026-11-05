@@ -1454,50 +1454,26 @@ app.whenReady().then(async () => {
   startConnectivityMonitor();
   ensureLocalBackendService();
 
-  // Handle Windows Sleep / Suspend / Resume gracefully with immediate recovery
+  // Handle Windows Sleep / Suspend / Resume gracefully
   if (powerMonitor) {
-    let resumeRecoveryTimer = null;
-
-    const performResumeRecovery = () => {
-      // 1. Immediate pass: refresh display bounds, ensure topmost, and notify renderer
-      handleDisplayChange();
-      startWebcamMonitoring();
-      startCursorTracker();
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        try {
-          mainWindow.webContents.send('system-resume');
-        } catch (_) {}
-      }
-
-      // 2. Secondary pass at 350ms to ensure DWM compositor re-attachment and monitor settle
-      if (resumeRecoveryTimer) clearTimeout(resumeRecoveryTimer);
-      resumeRecoveryTimer = setTimeout(() => {
-        resumeRecoveryTimer = null;
-        handleDisplayChange();
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          try {
-            mainWindow.webContents.send('system-resume');
-          } catch (_) {}
-        }
-      }, 350);
-    };
-
     powerMonitor.on('suspend', () => {
-      if (resumeRecoveryTimer) {
-        clearTimeout(resumeRecoveryTimer);
-        resumeRecoveryTimer = null;
-      }
       stopWebcamMonitoring();
       stopCursorTracker();
       if (mainWindow && !mainWindow.isDestroyed()) {
-        try {
-          mainWindow.webContents.send('system-suspend');
-        } catch (_) {}
+        mainWindow.webContents.send('system-suspend');
       }
     });
 
-    powerMonitor.on('resume', performResumeRecovery);
-    powerMonitor.on('unlock-screen', performResumeRecovery);
+    powerMonitor.on('resume', () => {
+      setTimeout(() => {
+        handleDisplayChange();
+        startWebcamMonitoring();
+        startCursorTracker();
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('system-resume');
+        }
+      }, 1500);
+    });
   }
 
   // Preserve user Windows startup setting without forcing changes silently
